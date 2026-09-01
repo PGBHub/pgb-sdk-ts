@@ -32,5 +32,9 @@
     "codegen"
   ],
   "author": "Hydratik <engineering@pgboxhub.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
+  }
 }

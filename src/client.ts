@@ -56,22 +56,22 @@ export interface SchemaJson {
   }>;
 }
 
-export class PGBoxClient {
+export class PGBoxClientCore {
   readonly endpoint: string;
   readonly apiKey?: string;
   readonly dbUrl?: string;
   readonly database: string;
 
-  /** Dynamic actions proxy (e.g. pgbox.actions.approveOrder({ id: 1 })) */
+  /** Actions proxy map (e.g. pgb.actions.saveUser({ ... })) */
   readonly actions: Record<string, (params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse>>;
 
   constructor(config: PGBoxClientConfig = {}) {
-    this.endpoint = (config.endpoint || "https://cloud.pgboxhub.com").replace(/\/$/, "");
+    this.endpoint = (config.endpoint || (typeof process !== "undefined" ? process.env?.PGBOX_ENDPOINT : undefined) || "https://cloud.pgboxhub.com").replace(/\/$/, "");
     this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBOX_API_KEY : undefined);
     this.dbUrl = config.dbUrl || (typeof process !== "undefined" ? process.env?.DATABASE_URL : undefined);
-    this.database = config.database || "postgres";
+    this.database = config.database || (typeof process !== "undefined" ? process.env?.PGBOX_DATABASE : undefined) || "postgres";
 
-    // Dynamic JavaScript Proxy handler for actions
+    // Dynamic JavaScript Proxy handler for actions sub-property
     this.actions = new Proxy({} as Record<string, any>, {
       get: (_target, prop: string) => {
         return (params: Record<string, unknown> = {}, opts: ActionInvokeOptions = {}) => {
@@ -79,6 +79,16 @@ export class PGBoxClient {
         };
       },
     });
+  }
+
+  /** Collection helper for document store CRUD operations */
+  collection(name: string) {
+    return {
+      insertOne: (doc: Record<string, unknown>) => this.invokeAction(`insert_${name}`, doc),
+      find: (filter: Record<string, unknown> = {}) => this.invokeAction(`find_${name}`, filter),
+      updateOne: (filter: Record<string, unknown>, update: Record<string, unknown>) => this.invokeAction(`update_${name}`, { filter, update }),
+      deleteOne: (filter: Record<string, unknown>) => this.invokeAction(`delete_${name}`, filter),
+    };
   }
 
   /** Fetch the structured machine-readable /schema.json metadata */
@@ -127,7 +137,27 @@ export class PGBoxClient {
   }
 }
 
+/** Dynamic PGBox client instance allowing direct method calls like pgb.saveUser({...}) */
+export type PGBoxClient = PGBoxClientCore & {
+  [actionName: string]: <T = unknown>(params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse<T>>;
+};
+
 /** Create and initialize a new PGBox client instance */
 export function createClient(config?: PGBoxClientConfig): PGBoxClient {
-  return new PGBoxClient(config);
+  const core = new PGBoxClientCore(config);
+  return new Proxy(core, {
+    get: (target: any, prop: string | symbol) => {
+      if (typeof prop === "string" && !(prop in target)) {
+        return (params: Record<string, unknown> = {}, opts: ActionInvokeOptions = {}) => {
+          return target.invokeAction(prop, params, opts);
+        };
+      }
+      return target[prop];
+    },
+  }) as PGBoxClient;
 }
+
+/** Default singleton instance with shorthand invocation support (e.g. `pgb.saveUser({...})`) */
+export const pgb: PGBoxClient = createClient();
+export const PGBox = createClient;
+export default pgb;
