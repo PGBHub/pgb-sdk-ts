@@ -12,37 +12,63 @@ pnpm add @pgbox/client
 yarn add @pgbox/client
 ```
 
-## Quick Start
+## Developer Paradigms
+
+### 1. Typed Table Models (ORM / Query Paradigm)
 
 ```typescript
-import { createClient } from "@pgbox/client";
+import { pgb } from "@pgbox/client";
 
-// Initialize client
-const pgbox = createClient({
-  apiKey: process.env.PGBOX_API_KEY,
-  endpoint: "https://cloud.pgboxhub.com",
-  database: "my_database",
+// Access tables as first-class entity accessors
+const User = pgb.user;
+
+// Full autocomplete on parameters and return types!
+const profiles = await User.find({ id: "8ef5-492a-bb81" });
+
+// Find single record
+const user = await User.findOne({ email: "alex@example.com" });
+
+// Insert a record
+const newUser = await User.create({
+  email: "alex@example.com",
+  name: "Alex",
 });
 
-// Dynamic Action Invocation (Mapped directly to your declarative actions)
-const res = await pgbox.actions.approveOrder({
-  orderId: "ord_9843",
-  approvedBy: "admin_user",
+// Update & delete
+await User.update({ id: "8ef5-492a-bb81" }, { name: "Alexander" });
+await User.delete({ id: "8ef5-492a-bb81" });
+```
+
+### 2. Declarative Database Actions
+
+```typescript
+// Direct invocation with automatic parameter validation
+const res = await pgb.saveUser({
+  username: "jdoe",
+  email: "jdoe@example.com",
+  preferences: { theme: "dark" },
 });
 
 console.log(res.status, res.duration_ms, res.results);
 ```
 
+---
+
 ## Local Type Generation (`npx pgbox pull`)
 
-Run the CLI in your project to pull `/schema.json` and generate local TypeScript declaration files with autocomplete for all tables and actions:
+Run the CLI in your project to pull the live schema from PGBox Cloud and generate local TypeScript declaration files (`pgbox.d.ts`) with full IntelliSense and autocomplete across all tables, models, and custom actions:
 
 ```bash
 npx pgbox pull --db my_database
 ```
 
-This generates `pgbox.d.ts` in your root directory, providing full IntelliSense in VS Code and Cursor!
+This generates `pgbox.d.ts` in your root directory:
+- `pgb.user.find({ ... })` (and `pgb.users`, `pgb.orders`, etc.) with 100% typed columns, types, and return values
+- `pgb.saveUser({ ... })` with typed action parameters
+
+---
 
 ## License
 
 MIT © [Hydratik](https://github.com/Hydratik)
+
