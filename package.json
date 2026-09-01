@@ -1,0 +1,36 @@
+{
+  "name": "@pgbox/client",
+  "version": "1.0.0",
+  "description": "Official TypeScript & Node.js client SDK and CLI for PGBox Cloud",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "pgbox": "./bin/pgbox.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hydratik/pgbox-ts.git"
+  },
+  "keywords": [
+    "pgbox",
+    "postgres",
+    "postgresql",
+    "serverless",
+    "database",
+    "sdk",
+    "actions",
+    "codegen"
+  ],
+  "author": "Hydratik <engineering@pgboxhub.com>",
+  "license": "MIT"
+}
