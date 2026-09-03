@@ -52,19 +52,46 @@ const res = await pgb.saveUser({
 console.log(res.status, res.duration_ms, res.results);
 ```
 
----
+## Local vs. Cloud: Seamless Switching
 
-## Local Type Generation (`npx pgbox pull`)
+The exact same `@pgbox/client` code works identically against **local PostgreSQL** (Docker / offline) and **PGBox Cloud**:
 
-Run the CLI in your project to pull the live schema from PGBox Cloud and generate local TypeScript declaration files (`pgbox.d.ts`) with full IntelliSense and autocomplete across all tables, models, and custom actions:
+```typescript
+import { createClient } from "@pgbox/client";
 
-```bash
-npx pgbox pull --db my_database
+// Seamless 1-env switch:
+// Local:      DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+// Production: PGBOX_ENDPOINT="https://pgbox.motoriqhub.com" PGBOX_API_KEY="pgb_live_..."
+const pgb = createClient({
+  endpoint: process.env.PGBOX_ENDPOINT,
+  apiKey: process.env.PGBOX_API_KEY,
+  dbUrl: process.env.DATABASE_URL,
+  database: "myapp",
+});
 ```
 
-This generates `pgbox.d.ts` in your root directory:
-- `pgb.user.find({ ... })` (and `pgb.users`, `pgb.orders`, etc.) with 100% typed columns, types, and return values
-- `pgb.saveUser({ ... })` with typed action parameters
+Zero code rewrites are required when promoting from local testing to production cloud.
+
+---
+
+## Deterministic Type Generation (Zero AI Tokens)
+
+Run the CLI in your project to pull the live schema from your local or cloud database and deterministically generate TypeScript declaration files (`pgbox.d.ts`) without spending a single AI token:
+
+```bash
+npx pgbox pull --db my_database --out src/types/pgbox.d.ts
+```
+
+This generates:
+- Full TypeScript interfaces for every database table.
+- Autocomplete and type validation on `pgb.table('users').find({ ... })`.
+- Typed parameter and return types for custom database actions.
+
+---
+
+## Comprehensive Developer & AI Agent Guide
+
+For detailed documentation, architectural diagrams, LLM agent tool definitions, and copy-pastable recipes, see the **[PGBox Master Developer & AI Agent Guide](file:///Users/alveis/Projects/Hydratik/pgbox/PGB_DEVELOPER_GUIDE.md)**.
 
 ---
 
