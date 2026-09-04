@@ -228,6 +228,9 @@ export class PGBoxClientCore {
     return res.json() as Promise<SchemaJson>;
   }
 
+  /** Functions API client namespace */
+  public readonly functions: FunctionsClient = new FunctionsClient(this);
+
   /** Invoke an action by name with input parameters */
   async invokeAction<T = unknown>(
     actionName: string,
@@ -239,6 +242,57 @@ export class PGBoxClientCore {
       params,
       dry_run: options.dryRun || false,
     });
+  }
+}
+
+export interface FunctionInvokeOptions {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+}
+
+/**
+ * Serverless Cloud & Edge Functions Client
+ */
+export class FunctionsClient {
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Invoke a serverless cloud function with ambient DB access */
+  async invoke<T = any>(
+    functionName: string,
+    payload: any = {},
+    options: FunctionInvokeOptions = {}
+  ): Promise<T> {
+    const queryStr = options.query ? `?${new URLSearchParams(options.query).toString()}` : "";
+    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions/${encodeURIComponent(functionName)}/invoke${queryStr}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+        ...(options.headers || {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Function '${functionName}' invocation failed [${res.status}]: ${err}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  /** List all configured cloud functions */
+  async list(): Promise<any[]> {
+    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    if (!res.ok) throw new Error(`Failed to list functions: ${res.statusText}`);
+    const data = await res.json();
+    return data.functions || [];
   }
 }
 
