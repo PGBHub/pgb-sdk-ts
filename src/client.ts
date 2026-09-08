@@ -1,5 +1,5 @@
 export interface PGBoxClientConfig {
-  /** PGBox Cloud Endpoint URL (default: https://cloud.pgboxhub.com) */
+  /** PGBox Cloud Endpoint URL (default: https://cloud.pgboxhub.com or project URL) */
   endpoint?: string;
   /** PGBox API Key or Access Token */
   apiKey?: string;
@@ -7,6 +7,12 @@ export interface PGBoxClientConfig {
   dbUrl?: string;
   /** Database name target (default: postgres) */
   database?: string;
+}
+
+export interface PGBoxClientOptions {
+  key?: string;
+  database?: string;
+  dbUrl?: string;
 }
 
 export interface ActionInvokeOptions {
@@ -28,6 +34,12 @@ export interface QueryOptions<T = any> {
   offset?: number;
   orderBy?: keyof T | string;
   order?: "ASC" | "DESC" | "asc" | "desc";
+}
+
+export interface SqlQueryResult<T = any> {
+  rows: T[];
+  row_count: number;
+  columns: string[];
 }
 
 export interface SchemaJson {
@@ -154,18 +166,419 @@ export class TableClient<T = Record<string, any>> {
   }
 }
 
+/**
+ * Database module for executing SQL queries via HTTP SQL Gateway
+ */
+export class DbClient {
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Execute a parameterised SQL statement via HTTP Database Gateway */
+  async query<T = any>(sql: string, params: any[] = []): Promise<SqlQueryResult<T>> {
+    const url = `${this.client.endpoint}/sql`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ sql, params }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`PGB SQL query error [${res.status}]: ${errText}`);
+    }
+    const data = (await res.json()) as any;
+    return {
+      rows: data.rows || [],
+      row_count: data.row_count ?? data.rows?.length ?? 0,
+      columns: data.columns || [],
+    };
+  }
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  is_verified?: boolean;
+  raw_user_meta?: Record<string, any>;
+  created_at?: string;
+}
+
+export interface AuthSession {
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  user?: AuthUser;
+}
+
+/**
+ * Built-In PGB Auth-as-a-Service Client
+ */
+export class AuthClient {
+  private currentSession: AuthSession | null = null;
+
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Sign up a new user with email & password */
+  async signUp(options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<{ user: AuthUser; session?: AuthSession }> {
+    const res = await fetch(`${this.client.endpoint}/auth/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        email: options.email,
+        password: options.password,
+        metadata: options.metadata || {},
+      }),
+    });
+    if (!res.ok) throw new Error(`Auth signUp failed [${res.status}]: ${await res.text()}`);
+    const data = (await res.json()) as any;
+    if (data.session) {
+      this.currentSession = data.session;
+    }
+    return data;
+  }
+
+  /** Sign in with email & password */
+  async signIn(options: { email: string; password?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
+    const res = await fetch(`${this.client.endpoint}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        email: options.email,
+        password: options.password,
+      }),
+    });
+    if (!res.ok) throw new Error(`Auth signIn failed [${res.status}]: ${await res.text()}`);
+    const data = (await res.json()) as any;
+    if (data.session) {
+      this.currentSession = data.session;
+    }
+    return data;
+  }
+
+  /** Sign out and invalidate session */
+  async signOut(): Promise<void> {
+    if (this.currentSession?.access_token) {
+      try {
+        await fetch(`${this.client.endpoint}/auth/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.currentSession.access_token}`,
+            "Content-Type": "application/json",
+          },
+        });
+      } catch {
+        // Best effort
+      }
+    }
+    this.currentSession = null;
+  }
+
+  /** Get current authenticated user details */
+  async getUser(): Promise<AuthUser | null> {
+    const token = this.currentSession?.access_token || this.client.apiKey;
+    if (!token) return null;
+    const res = await fetch(`${this.client.endpoint}/auth/user`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+    return data.user || data;
+  }
+
+  /** Get current active session */
+  getSession(): AuthSession | null {
+    return this.currentSession;
+  }
+
+  /** Set active session */
+  setSession(session: AuthSession | null): void {
+    this.currentSession = session;
+  }
+
+  /** Verify OTP token */
+  async verifyOtp(options: { email: string; token: string; type?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
+    const res = await fetch(`${this.client.endpoint}/auth/otp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        email: options.email,
+        token: options.token,
+        type: options.type || "email",
+      }),
+    });
+    if (!res.ok) throw new Error(`Auth verifyOtp failed [${res.status}]: ${await res.text()}`);
+    const data = (await res.json()) as any;
+    if (data.session) {
+      this.currentSession = data.session;
+    }
+    return data;
+  }
+
+  /** Send passwordless magic link */
+  async sendMagicLink(options: { email: string }): Promise<{ success: boolean; message?: string }> {
+    const res = await fetch(`${this.client.endpoint}/auth/magic`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ email: options.email }),
+    });
+    if (!res.ok) throw new Error(`Auth sendMagicLink failed [${res.status}]: ${await res.text()}`);
+    return (await res.json()) as any;
+  }
+}
+
+/**
+ * Storage Client for Cloudflare R2 Assets
+ */
+export class StorageClient {
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Upload an asset or file to Cloudflare R2 storage */
+  async upload(
+    filePath: string,
+    data: any,
+    options: { contentType?: string } = {}
+  ): Promise<{ path: string; url: string; size?: number }> {
+    const cleanPath = filePath.replace(/^\/+/, "");
+    // First obtain presigned upload URL
+    const presignRes = await fetch(`${this.client.endpoint}/storage/upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        file_path: cleanPath,
+        content_type: options.contentType || "application/octet-stream",
+      }),
+    });
+
+    if (presignRes.ok) {
+      const presignData = (await presignRes.json()) as any;
+      if (presignData.upload_url) {
+        // Direct upload to R2
+        const putRes = await fetch(presignData.upload_url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": options.contentType || "application/octet-stream",
+          },
+          body: data,
+        });
+        if (!putRes.ok) throw new Error(`Failed to upload file to R2 [${putRes.status}]`);
+        return {
+          path: cleanPath,
+          url: presignData.public_url || this.getPublicUrl(cleanPath),
+        };
+      }
+    }
+
+    // Direct upload fallback
+    const directRes = await fetch(`${this.client.endpoint}/storage/${cleanPath}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": options.contentType || "application/octet-stream",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: data,
+    });
+    if (!directRes.ok) throw new Error(`Storage upload failed [${directRes.status}]: ${await directRes.text()}`);
+    return {
+      path: cleanPath,
+      url: this.getPublicUrl(cleanPath),
+    };
+  }
+
+  /** Get public CDN URL for an asset */
+  getPublicUrl(filePath: string): string {
+    const cleanPath = filePath.replace(/^\/+/, "");
+    return `${this.client.endpoint}/storage/${cleanPath}`;
+  }
+
+  /** Delete a stored asset */
+  async delete(filePath: string): Promise<boolean> {
+    const cleanPath = filePath.replace(/^\/+/, "");
+    const res = await fetch(`${this.client.endpoint}/storage/${cleanPath}`, {
+      method: "DELETE",
+      headers: {
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    return res.ok;
+  }
+
+  /** List assets under a prefix */
+  async list(prefix: string = ""): Promise<Array<{ path: string; size: number; updated_at: string }>> {
+    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+    const res = await fetch(`${this.client.endpoint}/storage/list${query}`, {
+      headers: {
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as any;
+    return data.files || [];
+  }
+}
+
+export interface SendMailOptions {
+  to: string | string[];
+  subject: string;
+  html?: string;
+  text?: string;
+  from?: string;
+  replyTo?: string;
+}
+
+/**
+ * Transactional Mail Client
+ */
+export class MailClient {
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Send transactional email */
+  async send(options: SendMailOptions): Promise<{ success: boolean; message_id?: string }> {
+    const recipients = Array.isArray(options.to) ? options.to : [options.to];
+    const res = await fetch(`${this.client.endpoint}/mail/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        to: recipients,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        from: options.from,
+        reply_to: options.replyTo,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`Mail send failed [${res.status}]: ${await res.text()}`);
+    }
+    return (await res.json()) as any;
+  }
+}
+
+export interface FunctionInvokeOptions {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+}
+
+/**
+ * Serverless Cloud & Edge Functions Client
+ */
+export class FunctionsClient {
+  constructor(private readonly client: PGBoxClientCore) {}
+
+  /** Invoke a serverless cloud function with ambient DB access */
+  async invoke<T = any>(
+    functionName: string,
+    payload: any = {},
+    options: FunctionInvokeOptions = {}
+  ): Promise<T> {
+    const queryStr = options.query ? `?${new URLSearchParams(options.query).toString()}` : "";
+    const cleanFn = functionName.replace(/^\/+/, "");
+    // Try project-scoped function invocation first (/functions/:name)
+    const projectUrl = `${this.client.endpoint}/functions/${encodeURIComponent(cleanFn)}${queryStr}`;
+    let res = await fetch(projectUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+        ...(options.headers || {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 404) {
+      // Fallback to database-scoped function route
+      const fallbackUrl = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions/${encodeURIComponent(cleanFn)}/invoke${queryStr}`;
+      res = await fetch(fallbackUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+          ...(options.headers || {}),
+        },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Function '${functionName}' invocation failed [${res.status}]: ${err}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  /** List all configured cloud functions */
+  async list(): Promise<any[]> {
+    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    if (!res.ok) throw new Error(`Failed to list functions: ${res.statusText}`);
+    const data = await res.json();
+    return data.functions || [];
+  }
+}
+
 export class PGBoxClientCore {
   readonly endpoint: string;
   readonly apiKey?: string;
   readonly dbUrl?: string;
   readonly database: string;
 
+  /** HTTP Database Gateway Query API */
+  public readonly db: DbClient = new DbClient(this);
+
+  /** Built-In Auth-as-a-Service API */
+  public readonly auth: AuthClient = new AuthClient(this);
+
+  /** Storage R2 Asset API */
+  public readonly storage: StorageClient = new StorageClient(this);
+
+  /** Transactional Email Dispatch API */
+  public readonly mail: MailClient = new MailClient(this);
+
+  /** Functions API client namespace */
+  public readonly functions: FunctionsClient = new FunctionsClient(this);
+
   /** Actions proxy map (e.g. pgb.actions.saveUser({ ... })) */
   readonly actions: Record<string, (params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse>>;
 
   constructor(config: PGBoxClientConfig = {}) {
-    this.endpoint = (config.endpoint || (typeof process !== "undefined" ? process.env?.PGBOX_ENDPOINT : undefined) || "https://cloud.pgboxhub.com").replace(/\/$/, "");
-    this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBOX_API_KEY : undefined);
+    this.endpoint = (config.endpoint || (typeof process !== "undefined" ? process.env?.PGBOX_ENDPOINT || process.env?.PGBOX_PROJECT_URL : undefined) || "https://cloud.pgboxhub.com").replace(/\/$/, "");
+    this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBOX_API_KEY || process.env?.PGBOX_PUBLISHABLE_KEY : undefined);
     this.dbUrl = config.dbUrl || (typeof process !== "undefined" ? process.env?.DATABASE_URL : undefined);
     this.database = config.database || (typeof process !== "undefined" ? process.env?.PGBOX_DATABASE : undefined) || "postgres";
 
@@ -228,9 +641,6 @@ export class PGBoxClientCore {
     return res.json() as Promise<SchemaJson>;
   }
 
-  /** Functions API client namespace */
-  public readonly functions: FunctionsClient = new FunctionsClient(this);
-
   /** Invoke an action by name with input parameters */
   async invokeAction<T = unknown>(
     actionName: string,
@@ -245,64 +655,32 @@ export class PGBoxClientCore {
   }
 }
 
-export interface FunctionInvokeOptions {
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
-}
-
-/**
- * Serverless Cloud & Edge Functions Client
- */
-export class FunctionsClient {
-  constructor(private readonly client: PGBoxClientCore) {}
-
-  /** Invoke a serverless cloud function with ambient DB access */
-  async invoke<T = any>(
-    functionName: string,
-    payload: any = {},
-    options: FunctionInvokeOptions = {}
-  ): Promise<T> {
-    const queryStr = options.query ? `?${new URLSearchParams(options.query).toString()}` : "";
-    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions/${encodeURIComponent(functionName)}/invoke${queryStr}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-        ...(options.headers || {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Function '${functionName}' invocation failed [${res.status}]: ${err}`);
-    }
-    return res.json() as Promise<T>;
-  }
-
-  /** List all configured cloud functions */
-  async list(): Promise<any[]> {
-    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions`;
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-      },
-    });
-    if (!res.ok) throw new Error(`Failed to list functions: ${res.statusText}`);
-    const data = await res.json();
-    return data.functions || [];
-  }
-}
-
 /** Dynamic PGBox client instance allowing direct table models (e.g. pgbox.user.find(...)) and action calls (e.g. pgb.saveUser({...})) */
 export type PGBoxClient = PGBoxClientCore & {
   [key: string]: TableClient<any> & (<T = unknown>(params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse<T>>);
 };
 
 /** Create and initialize a new PGBox client instance */
-export function createClient(config?: PGBoxClientConfig): PGBoxClient {
+export function createClient(
+  projectUrlOrConfig?: string | PGBoxClientConfig,
+  options?: PGBoxClientOptions
+): PGBoxClient {
+  let config: PGBoxClientConfig = {};
+  if (typeof projectUrlOrConfig === "string") {
+    let endpoint = projectUrlOrConfig.trim();
+    if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+      endpoint = `https://${endpoint}.pgbhub.dev`;
+    }
+    config = {
+      endpoint,
+      apiKey: options?.key,
+      database: options?.database,
+      dbUrl: options?.dbUrl,
+    };
+  } else if (projectUrlOrConfig) {
+    config = projectUrlOrConfig;
+  }
+
   const core = new PGBoxClientCore(config);
   return new Proxy(core, {
     get: (target: any, prop: string | symbol) => {
@@ -328,8 +706,7 @@ export function createClient(config?: PGBoxClientConfig): PGBoxClient {
   }) as PGBoxClient;
 }
 
-/** Default singleton instance with shorthand invocation support (e.g. `pgb.user.find({...})` or `pgb.saveUser({...})`) */
+/** Default singleton instance with shorthand invocation support (e.g. `pgb.user.find({...})` or `pgb.db.query(...)`) */
 export const pgb: PGBoxClient = createClient();
 export const PGBox = createClient;
 export default pgb;
-

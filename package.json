@@ -1,11 +1,12 @@
 {
-  "name": "@pgbox/client",
+  "name": "@pgb/sdk",
   "version": "1.0.0",
-  "description": "Official TypeScript & Node.js client SDK and CLI for PGBox Cloud",
+  "description": "Universal TypeScript & Node.js client SDK and Developer CLI for PGBox Cloud",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
+    "pgb": "./bin/pgb.js",
     "pgbox": "./bin/pgbox.js"
   },
   "files": [
