@@ -1,13 +1,13 @@
 {
   "name": "@pgb/sdk",
   "version": "1.0.0",
-  "description": "Universal TypeScript & Node.js client SDK and Developer CLI for PGBox Cloud",
+  "description": "Universal TypeScript & Node.js client SDK and Developer CLI for PGBHub Cloud",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
     "pgb": "./bin/pgb.js",
-    "pgbox": "./bin/pgbox.js"
+    "pgbhub": "./bin/pgbhub.js"
   },
   "files": [
     "dist",
@@ -20,10 +20,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/PGBHub/pgbox-sdk-ts.git"
+    "url": "https://github.com/PGBHub/pgbhub-sdk-ts.git"
   },
   "keywords": [
-    "pgbox",
+    "pgbhub",
     "postgres",
     "postgresql",
     "serverless",

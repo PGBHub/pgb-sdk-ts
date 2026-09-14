@@ -37,7 +37,7 @@ export async function runCli() {
 
 function printUsage() {
   console.log(`
-⚡ PGBox Developer CLI (pgb) — @pgb/sdk
+⚡ PGBHub Developer CLI (pgb) — @pgb/sdk
 
 Usage:
   pgb <command> [options]
@@ -45,17 +45,17 @@ Usage:
 Commands:
   pgb init <project>   Scaffold a standardized PGB starter template
   pgb dev              Start the local developer simulator on port 4000
-  pgb login            Authenticate CLI with your PGBox account
-  pgb pull             Pull /schema.json and generate TypeScript types (pgbox.d.ts)
+  pgb login            Authenticate CLI with your PGBHub account
+  pgb pull             Pull /schema.json and generate TypeScript types (pgbhub.d.ts)
   pgb inspect          Print database semantic schema JSON to stdout
   pgb help             Show this help documentation
 
 Options:
   --port <port>        Port for pgb dev simulator (default: 4000)
-  --endpoint <url>     PGBox Cloud endpoint (default: $PGBOX_ENDPOINT or https://cloud.pgboxhub.com)
-  --key <api-key>      PGBox API Key (default: $PGBOX_API_KEY)
+  --endpoint <url>     PGBHub Cloud endpoint (default: $PGBHUB_ENDPOINT or https://cloud.pgbhub.com)
+  --key <api-key>      PGBHub API Key (default: $PGBHUB_API_KEY)
   --db <dbname>        Target database name (default: postgres)
-  --out <filename>     Output filename for pgb pull (default: pgbox.d.ts)
+  --out <filename>     Output filename for pgb pull (default: pgbhub.d.ts)
 `);
 }
 
@@ -64,34 +64,34 @@ async function handleLogin(args: string[]) {
   let key = keyIndex !== -1 ? args[keyIndex + 1] : undefined;
 
   if (!key) {
-    key = process.env.PGBOX_API_KEY;
+    key = process.env.PGBHUB_API_KEY;
   }
 
   if (!key) {
     console.log(`
-🔐 PGBox Authentication:
+🔐 PGBHub Authentication:
 Please specify your API key using:
   pgb login --key <pgb_sec_...>
 
 Or set the environment variable:
-  export PGBOX_API_KEY="pgb_sec_..."
+  export PGBHUB_API_KEY="pgb_sec_..."
 
-You can obtain your secret key from your PGBox Console dashboard.
+You can obtain your secret key from your PGBHub Console dashboard.
 `);
     process.exit(1);
   }
 
-  const configDir = path.join(os.homedir(), ".pgbox");
+  const configDir = path.join(os.homedir(), ".pgbhub");
   const configFile = path.join(configDir, "config.json");
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
   }
 
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBOX_ENDPOINT || "https://cloud.pgboxhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
 
   fs.writeFileSync(configFile, JSON.stringify({ apiKey: key, endpoint, loggedInAt: new Date().toISOString() }, null, 2));
-  console.log(`✅ Successfully logged in! Credentials saved to ~/.pgbox/config.json`);
+  console.log(`✅ Successfully logged in! Credentials saved to ~/.pgbhub/config.json`);
 }
 
 async function handleInit(args: string[]) {
@@ -103,7 +103,7 @@ async function handleInit(args: string[]) {
     process.exit(1);
   }
 
-  console.log(`🚀 Scaffolding new PGBox project in ./${projectName}...`);
+  console.log(`🚀 Scaffolding new PGBHub project in ./${projectName}...`);
 
   fs.mkdirSync(path.join(targetDir, "functions"), { recursive: true });
   fs.mkdirSync(path.join(targetDir, "containers"), { recursive: true });
@@ -161,7 +161,7 @@ export async function run() {
   // 4. migrations/001_initial_schema.sql
   fs.writeFileSync(
     path.join(targetDir, "migrations", "001_initial_schema.sql"),
-    `-- Initial PGBox Schema Migration
+    `-- Initial PGBHub Schema Migration
 CREATE TABLE IF NOT EXISTS items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title TEXT NOT NULL,
@@ -205,9 +205,9 @@ CREATE INDEX IF NOT EXISTS idx_items_created_at ON items (created_at DESC);
   // 6. .env.example
   fs.writeFileSync(
     path.join(targetDir, ".env.example"),
-    `PGBOX_PROJECT_URL=https://${projectName}.pgbhub.dev
-PGBOX_API_KEY=pgb_sec_example_key_replace_with_actual
-PGBOX_PUBLISHABLE_KEY=pgb_pub_example_key_replace_with_actual
+    `PGBHUB_PROJECT_URL=https://${projectName}.pgbhub.dev
+PGBHUB_API_KEY=pgb_sec_example_key_replace_with_actual
+PGBHUB_PUBLISHABLE_KEY=pgb_pub_example_key_replace_with_actual
 DATABASE_URL=postgresql://${projectName}_app:password@db.pgbhub.dev:5432/${projectName}
 `
   );
@@ -238,7 +238,7 @@ DATABASE_URL=postgresql://${projectName}_app:password@db.pgbhub.dev:5432/${proje
     path.join(targetDir, "README.md"),
     `# ${projectName}
 
-Full-stack project powered by [PGBox Cloud](https://pgboxhub.com).
+Full-stack project powered by [PGBHub Cloud](https://pgbhub.com).
 
 ## Project Structure
 
@@ -262,7 +262,7 @@ Full-stack project powered by [PGBox Cloud](https://pgboxhub.com).
 `
   );
 
-  console.log(`✅ Standardized PGBox project template initialized in ./${projectName}!`);
+  console.log(`✅ Standardized PGBHub project template initialized in ./${projectName}!`);
   console.log(`\nNext steps:`);
   console.log(`  cd ${projectName}`);
   console.log(`  npx pgb dev\n`);
@@ -390,7 +390,7 @@ async function handleDev(args: string[]) {
   server.listen(port, "127.0.0.1", () => {
     console.log(`
 ========================================================================
-🚀 PGBox Local Developer Simulator active on http://127.0.0.1:${port}
+🚀 PGBHub Local Developer Simulator active on http://127.0.0.1:${port}
 ========================================================================
 📡 Endpoints ready:
    - POST /sql               (HTTP Database Gateway Simulator)
@@ -410,18 +410,18 @@ Press Ctrl+C to terminate simulator.
 
 async function handlePull(args: string[]) {
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBOX_ENDPOINT || "https://cloud.pgboxhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
 
   const keyIndex = args.indexOf("--key");
-  const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBOX_API_KEY;
+  const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBHUB_API_KEY;
 
   const dbIndex = args.indexOf("--db");
-  const database = dbIndex !== -1 ? args[dbIndex + 1] : process.env.PGBOX_DATABASE || "postgres";
+  const database = dbIndex !== -1 ? args[dbIndex + 1] : process.env.PGBHUB_DATABASE || "postgres";
 
   const outIndex = args.indexOf("--out");
-  const outputFile = outIndex !== -1 ? args[outIndex + 1] : "pgbox.d.ts";
+  const outputFile = outIndex !== -1 ? args[outIndex + 1] : "pgbhub.d.ts";
 
-  console.log(`📡 Connecting to PGBox at ${endpoint} (db: ${database})...`);
+  console.log(`📡 Connecting to PGBHub at ${endpoint} (db: ${database})...`);
   const client = createClient({ endpoint, apiKey, database });
 
   try {
@@ -441,13 +441,13 @@ async function handlePull(args: string[]) {
 
 async function handleInspect(args: string[]) {
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBOX_ENDPOINT || "https://cloud.pgboxhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
 
   const keyIndex = args.indexOf("--key");
-  const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBOX_API_KEY;
+  const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBHUB_API_KEY;
 
   const dbIndex = args.indexOf("--db");
-  const database = dbIndex !== -1 ? args[dbIndex + 1] : process.env.PGBOX_DATABASE || "postgres";
+  const database = dbIndex !== -1 ? args[dbIndex + 1] : process.env.PGBHUB_DATABASE || "postgres";
 
   const client = createClient({ endpoint, apiKey, database });
   try {
@@ -493,7 +493,7 @@ function generateDeclarationContent(schema: SchemaJson): string {
     );
   }
 
-  return `// Auto-generated by PGBox CLI (npx pgb pull)
+  return `// Auto-generated by PGBHub CLI (npx pgb pull)
 // Do not edit directly. Re-run 'npx pgb pull' to sync latest database changes.
 
 import { ActionResponse, TableClient } from "@pgb/sdk";
@@ -503,7 +503,7 @@ declare module "@pgb/sdk" {
 ${tableInterfaces.join("\n\n")}
   }
 
-  export interface PGBoxClient {
+  export interface PGBHubClient {
     // --- Typed Table Accessors (ORM / Query Paradigm) ---
 ${tableAccessors.length > 0 ? tableAccessors.join("\n") : "    // No public tables"}
 

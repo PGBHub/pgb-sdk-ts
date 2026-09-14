@@ -1,7 +1,7 @@
-export interface PGBoxClientConfig {
-  /** PGBox Cloud Endpoint URL (default: https://cloud.pgboxhub.com or project URL) */
+export interface PGBHubClientConfig {
+  /** PGBHub Cloud Endpoint URL (default: https://cloud.pgbhub.com or project URL) */
   endpoint?: string;
-  /** PGBox API Key or Access Token */
+  /** PGBHub API Key or Access Token */
   apiKey?: string;
   /** Direct PostgreSQL Connection URL (optional for direct pooler connections) */
   dbUrl?: string;
@@ -9,7 +9,7 @@ export interface PGBoxClientConfig {
   database?: string;
 }
 
-export interface PGBoxClientOptions {
+export interface PGBHubClientOptions {
   key?: string;
   database?: string;
   dbUrl?: string;
@@ -80,7 +80,7 @@ export interface SchemaJson {
  */
 export class TableClient<T = Record<string, any>> {
   constructor(
-    private readonly client: PGBoxClientCore,
+    private readonly client: PGBHubClientCore,
     public readonly tableName: string
   ) {}
 
@@ -170,7 +170,7 @@ export class TableClient<T = Record<string, any>> {
  * Database module for executing SQL queries via HTTP SQL Gateway
  */
 export class DbClient {
-  constructor(private readonly client: PGBoxClientCore) {}
+  constructor(private readonly client: PGBHubClientCore) {}
 
   /** Execute a parameterised SQL statement via HTTP Database Gateway */
   async query<T = any>(sql: string, params: any[] = []): Promise<SqlQueryResult<T>> {
@@ -218,7 +218,7 @@ export interface AuthSession {
 export class AuthClient {
   private currentSession: AuthSession | null = null;
 
-  constructor(private readonly client: PGBoxClientCore) {}
+  constructor(private readonly client: PGBHubClientCore) {}
 
   /** Sign up a new user with email & password */
   async signUp(options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<{ user: AuthUser; session?: AuthSession }> {
@@ -351,7 +351,7 @@ export class AuthClient {
  * Storage Client for Cloudflare R2 Assets
  */
 export class StorageClient {
-  constructor(private readonly client: PGBoxClientCore) {}
+  constructor(private readonly client: PGBHubClientCore) {}
 
   /** Upload an asset or file to Cloudflare R2 storage */
   async upload(
@@ -455,7 +455,7 @@ export interface SendMailOptions {
  * Transactional Mail Client
  */
 export class MailClient {
-  constructor(private readonly client: PGBoxClientCore) {}
+  constructor(private readonly client: PGBHubClientCore) {}
 
   /** Send transactional email */
   async send(options: SendMailOptions): Promise<{ success: boolean; message_id?: string }> {
@@ -492,7 +492,7 @@ export interface FunctionInvokeOptions {
  * Serverless Cloud & Edge Functions Client
  */
 export class FunctionsClient {
-  constructor(private readonly client: PGBoxClientCore) {}
+  constructor(private readonly client: PGBHubClientCore) {}
 
   /** Invoke a serverless cloud function with ambient DB access */
   async invoke<T = any>(
@@ -552,7 +552,7 @@ export class FunctionsClient {
   }
 }
 
-export class PGBoxClientCore {
+export class PGBHubClientCore {
   readonly endpoint: string;
   readonly apiKey?: string;
   readonly dbUrl?: string;
@@ -576,11 +576,11 @@ export class PGBoxClientCore {
   /** Actions proxy map (e.g. pgb.actions.saveUser({ ... })) */
   readonly actions: Record<string, (params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse>>;
 
-  constructor(config: PGBoxClientConfig = {}) {
-    this.endpoint = (config.endpoint || (typeof process !== "undefined" ? process.env?.PGBOX_ENDPOINT || process.env?.PGBOX_PROJECT_URL : undefined) || "https://cloud.pgboxhub.com").replace(/\/$/, "");
-    this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBOX_API_KEY || process.env?.PGBOX_PUBLISHABLE_KEY : undefined);
+  constructor(config: PGBHubClientConfig = {}) {
+    this.endpoint = (config.endpoint || (typeof process !== "undefined" ? process.env?.PGBHUB_ENDPOINT || process.env?.PGBHUB_PROJECT_URL : undefined) || "https://cloud.pgbhub.com").replace(/\/$/, "");
+    this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBHUB_API_KEY || process.env?.PGBHUB_PUBLISHABLE_KEY : undefined);
     this.dbUrl = config.dbUrl || (typeof process !== "undefined" ? process.env?.DATABASE_URL : undefined);
-    this.database = config.database || (typeof process !== "undefined" ? process.env?.PGBOX_DATABASE : undefined) || "postgres";
+    this.database = config.database || (typeof process !== "undefined" ? process.env?.PGBHUB_DATABASE : undefined) || "postgres";
 
     // Dynamic JavaScript Proxy handler for actions sub-property
     this.actions = new Proxy({} as Record<string, any>, {
@@ -621,7 +621,7 @@ export class PGBoxClientCore {
     });
     if (!res.ok) {
       const errorText = await res.text();
-      throw new Error(`PGBox request to ${path} failed [${res.status}]: ${errorText}`);
+      throw new Error(`PGBHub request to ${path} failed [${res.status}]: ${errorText}`);
     }
     return res.json() as Promise<R>;
   }
@@ -655,17 +655,17 @@ export class PGBoxClientCore {
   }
 }
 
-/** Dynamic PGBox client instance allowing direct table models (e.g. pgbox.user.find(...)) and action calls (e.g. pgb.saveUser({...})) */
-export type PGBoxClient = PGBoxClientCore & {
+/** Dynamic PGBHub client instance allowing direct table models (e.g. pgbhub.user.find(...)) and action calls (e.g. pgb.saveUser({...})) */
+export type PGBHubClient = PGBHubClientCore & {
   [key: string]: TableClient<any> & (<T = unknown>(params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse<T>>);
 };
 
-/** Create and initialize a new PGBox client instance */
+/** Create and initialize a new PGBHub client instance */
 export function createClient(
-  projectUrlOrConfig?: string | PGBoxClientConfig,
-  options?: PGBoxClientOptions
-): PGBoxClient {
-  let config: PGBoxClientConfig = {};
+  projectUrlOrConfig?: string | PGBHubClientConfig,
+  options?: PGBHubClientOptions
+): PGBHubClient {
+  let config: PGBHubClientConfig = {};
   if (typeof projectUrlOrConfig === "string") {
     let endpoint = projectUrlOrConfig.trim();
     if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
@@ -681,7 +681,7 @@ export function createClient(
     config = projectUrlOrConfig;
   }
 
-  const core = new PGBoxClientCore(config);
+  const core = new PGBHubClientCore(config);
   return new Proxy(core, {
     get: (target: any, prop: string | symbol) => {
       if (typeof prop === "string" && !(prop in target)) {
@@ -703,10 +703,10 @@ export function createClient(
       }
       return target[prop];
     },
-  }) as PGBoxClient;
+  }) as PGBHubClient;
 }
 
 /** Default singleton instance with shorthand invocation support (e.g. `pgb.user.find({...})` or `pgb.db.query(...)`) */
-export const pgb: PGBoxClient = createClient();
-export const PGBox = createClient;
+export const pgb: PGBHubClient = createClient();
+export const PGBHub = createClient;
 export default pgb;
