@@ -16,6 +16,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "pretest": "tsc -p tsconfig.test.json",
+    "test": "node --test test-dist/test/*.test.js",
     "prepublishOnly": "npm run build"
   },
   "repository": {

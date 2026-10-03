@@ -213,89 +213,47 @@ export interface AuthSession {
 }
 
 /**
- * Built-In PGB Auth-as-a-Service Client
+ * Built-In PGB Auth-as-a-Service Client.
+ *
+ * NOT YET IMPLEMENTED on the server: PGBHub has no public `/auth/*` HTTP
+ * API today, only internal engine functions and dashboard-session-only
+ * routes. Every network method below used to call nonexistent endpoints
+ * and fail with a bare 404 that looked like a transient network error.
+ * They now throw a clear "not implemented" error instead, until the real
+ * backend routes exist (tracked in PGBHub/pgb-cloud's SDK parity plan).
+ * `getSession`/`setSession` are pure local state and remain functional.
  */
 export class AuthClient {
   private currentSession: AuthSession | null = null;
 
   constructor(private readonly client: PGBHubClientCore) {}
 
+  private notImplemented(method: string): never {
+    throw new Error(
+      `PGBHub Auth.${method}() is not implemented yet: the server has no public Auth-as-a-Service API. ` +
+        `Track status at https://github.com/PGBHub/pgb-cloud.`
+    );
+  }
+
   /** Sign up a new user with email & password */
-  async signUp(options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<{ user: AuthUser; session?: AuthSession }> {
-    const res = await fetch(`${this.client.endpoint}/auth/signup`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        email: options.email,
-        password: options.password,
-        metadata: options.metadata || {},
-      }),
-    });
-    if (!res.ok) throw new Error(`Auth signUp failed [${res.status}]: ${await res.text()}`);
-    const data = (await res.json()) as any;
-    if (data.session) {
-      this.currentSession = data.session;
-    }
-    return data;
+  async signUp(_options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<{ user: AuthUser; session?: AuthSession }> {
+    return this.notImplemented("signUp");
   }
 
   /** Sign in with email & password */
-  async signIn(options: { email: string; password?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
-    const res = await fetch(`${this.client.endpoint}/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        email: options.email,
-        password: options.password,
-      }),
-    });
-    if (!res.ok) throw new Error(`Auth signIn failed [${res.status}]: ${await res.text()}`);
-    const data = (await res.json()) as any;
-    if (data.session) {
-      this.currentSession = data.session;
-    }
-    return data;
+  async signIn(_options: { email: string; password?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
+    return this.notImplemented("signIn");
   }
 
   /** Sign out and invalidate session */
   async signOut(): Promise<void> {
-    if (this.currentSession?.access_token) {
-      try {
-        await fetch(`${this.client.endpoint}/auth/logout`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.currentSession.access_token}`,
-            "Content-Type": "application/json",
-          },
-        });
-      } catch {
-        // Best effort
-      }
-    }
     this.currentSession = null;
+    return this.notImplemented("signOut");
   }
 
   /** Get current authenticated user details */
   async getUser(): Promise<AuthUser | null> {
-    const token = this.currentSession?.access_token || this.client.apiKey;
-    if (!token) return null;
-    const res = await fetch(`${this.client.endpoint}/auth/user`, {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    return data.user || data;
+    return this.notImplemented("getUser");
   }
 
   /** Get current active session */
@@ -309,41 +267,13 @@ export class AuthClient {
   }
 
   /** Verify OTP token */
-  async verifyOtp(options: { email: string; token: string; type?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
-    const res = await fetch(`${this.client.endpoint}/auth/otp`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        email: options.email,
-        token: options.token,
-        type: options.type || "email",
-      }),
-    });
-    if (!res.ok) throw new Error(`Auth verifyOtp failed [${res.status}]: ${await res.text()}`);
-    const data = (await res.json()) as any;
-    if (data.session) {
-      this.currentSession = data.session;
-    }
-    return data;
+  async verifyOtp(_options: { email: string; token: string; type?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
+    return this.notImplemented("verifyOtp");
   }
 
   /** Send passwordless magic link */
-  async sendMagicLink(options: { email: string }): Promise<{ success: boolean; message?: string }> {
-    const res = await fetch(`${this.client.endpoint}/auth/magic`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
-      },
-      body: JSON.stringify({ email: options.email }),
-    });
-    if (!res.ok) throw new Error(`Auth sendMagicLink failed [${res.status}]: ${await res.text()}`);
-    return (await res.json()) as any;
+  async sendMagicLink(_options: { email: string }): Promise<{ success: boolean; message?: string }> {
+    return this.notImplemented("sendMagicLink");
   }
 }
 
@@ -418,11 +348,18 @@ export class StorageClient {
   /** Delete a stored asset */
   async delete(filePath: string): Promise<boolean> {
     const cleanPath = filePath.replace(/^\/+/, "");
-    const res = await fetch(`${this.client.endpoint}/storage/${cleanPath}`, {
-      method: "DELETE",
+    // The server only supports deletion via POST /storage/delete with a
+    // JSON body — there is no DELETE /storage/{path} route. A path-based
+    // DELETE silently falls through to the unrelated raw-file-delivery
+    // branch and never deletes anything.
+    const res = await fetch(`${this.client.endpoint}/storage/delete`, {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
         ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
       },
+      body: JSON.stringify({ path: cleanPath }),
     });
     return res.ok;
   }
@@ -438,7 +375,8 @@ export class StorageClient {
     });
     if (!res.ok) return [];
     const data = (await res.json()) as any;
-    return data.files || [];
+    // The server returns { objects, count }, not { files }.
+    return data.objects || [];
   }
 }
 
@@ -451,15 +389,20 @@ export interface SendMailOptions {
   replyTo?: string;
 }
 
+export interface MailSendResult {
+  success: boolean;
+  message_id?: string;
+  /** Present only when `to` had more than one recipient (see note below). */
+  results?: Array<{ to: string; success: boolean; message_id?: string; error?: string }>;
+}
+
 /**
  * Transactional Mail Client
  */
 export class MailClient {
   constructor(private readonly client: PGBHubClientCore) {}
 
-  /** Send transactional email */
-  async send(options: SendMailOptions): Promise<{ success: boolean; message_id?: string }> {
-    const recipients = Array.isArray(options.to) ? options.to : [options.to];
+  private async sendOne(options: SendMailOptions, to: string): Promise<{ success: boolean; message_id?: string }> {
     const res = await fetch(`${this.client.endpoint}/mail/send`, {
       method: "POST",
       headers: {
@@ -468,7 +411,7 @@ export class MailClient {
         ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
       },
       body: JSON.stringify({
-        to: recipients,
+        to,
         subject: options.subject,
         html: options.html,
         text: options.text,
@@ -477,9 +420,41 @@ export class MailClient {
       }),
     });
     if (!res.ok) {
-      throw new Error(`Mail send failed [${res.status}]: ${await res.text()}`);
+      throw new Error(`Mail send to ${to} failed [${res.status}]: ${await res.text()}`);
     }
     return (await res.json()) as any;
+  }
+
+  /**
+   * Send transactional email.
+   *
+   * The server's `/mail/send` endpoint accepts exactly one `to` address
+   * per request, not an array — sending the array as-is (the old
+   * behavior) produced a stringified list like `"['a@x.com']"` that
+   * always failed server-side email validation, so every send failed.
+   * A single string `to` sends one request as before; an array sends
+   * one request per recipient and aggregates the results instead of
+   * silently delivering to only one address.
+   */
+  async send(options: SendMailOptions): Promise<MailSendResult> {
+    const recipients = Array.isArray(options.to) ? options.to : [options.to];
+    if (recipients.length === 0) {
+      throw new Error("Mail send failed: 'to' must include at least one recipient");
+    }
+    if (recipients.length === 1) {
+      return this.sendOne(options, recipients[0]);
+    }
+    const results = await Promise.all(
+      recipients.map(async (to) => {
+        try {
+          const r = await this.sendOne(options, to);
+          return { to, success: r.success !== false, message_id: r.message_id };
+        } catch (err) {
+          return { to, success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+    return { success: results.every((r) => r.success), results };
   }
 }
 
