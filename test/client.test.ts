@@ -128,20 +128,6 @@ test("StorageClient.delete: POSTs to /storage/delete with a JSON body, not DELET
   assert.equal(body.path, "avatars/pic.png");
 });
 
-test("AuthClient: every network method throws a clear 'not implemented' error without calling fetch", async () => {
-  const client = makeClient();
-  const auth = new AuthClient(client);
-
-  await assert.rejects(() => auth.signUp({ email: "a@test.com" }), /not implemented/i);
-  await assert.rejects(() => auth.signIn({ email: "a@test.com" }), /not implemented/i);
-  await assert.rejects(() => auth.signOut(), /not implemented/i);
-  await assert.rejects(() => auth.getUser(), /not implemented/i);
-  await assert.rejects(() => auth.verifyOtp({ email: "a@test.com", token: "123" }), /not implemented/i);
-  await assert.rejects(() => auth.sendMagicLink({ email: "a@test.com" }), /not implemented/i);
-
-  assert.equal(calls.length, 0, "no AuthClient method should call a nonexistent backend route");
-});
-
 test("AuthClient: getSession/setSession remain functional local state (no network call)", () => {
   const client = makeClient();
   const auth = new AuthClient(client);

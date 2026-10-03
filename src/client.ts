@@ -208,52 +208,116 @@ export interface AuthUser {
 export interface AuthSession {
   access_token: string;
   refresh_token: string;
+  token_type?: string;
   expires_in?: number;
+  expires_at?: string;
   user?: AuthUser;
+}
+
+export interface AuthResult {
+  user: AuthUser;
+  session: AuthSession;
+}
+
+export interface LoginResult {
+  user?: AuthUser;
+  session?: AuthSession;
+  /** Present instead of user/session when the account has MFA enabled — redeem via a future completeMfaLogin() call. */
+  mfa_required?: boolean;
+  challenge_token?: string;
+  expires_in?: number;
 }
 
 /**
  * Built-In PGB Auth-as-a-Service Client.
  *
- * NOT YET IMPLEMENTED on the server: PGBHub has no public `/auth/*` HTTP
- * API today, only internal engine functions and dashboard-session-only
- * routes. Every network method below used to call nonexistent endpoints
- * and fail with a bare 404 that looked like a transient network error.
- * They now throw a clear "not implemented" error instead, until the real
- * backend routes exist (tracked in PGBHub/pgb-cloud's SDK parity plan).
- * `getSession`/`setSession` are pure local state and remain functional.
+ * Backed by PGBHub's project-ingress `/auth/*` HTTP API
+ * (pgb-cloud/app/routers/auth_ingress.py). Two different bearer tokens
+ * are in play: the client's own `apiKey` (a project Secret/Publishable
+ * key) identifies the *project*, sent as `Authorization: Bearer <key>`
+ * on every call; the *end user's* own access token (held in
+ * `currentSession`, settable via `setSession`) is sent separately as
+ * `X-PGB-User-Token` on the handful of routes that need to know who's
+ * calling (getUser, signOut).
  */
 export class AuthClient {
   private currentSession: AuthSession | null = null;
 
-  constructor(private readonly client: PGBHubClientCore) {}
+  /** Admin user management — requires a Secret key, not Publishable. */
+  readonly admin: AuthAdminClient;
 
-  private notImplemented(method: string): never {
-    throw new Error(
-      `PGBHub Auth.${method}() is not implemented yet: the server has no public Auth-as-a-Service API. ` +
-        `Track status at https://github.com/PGBHub/pgb-cloud.`
-    );
+  constructor(private readonly client: PGBHubClientCore) {
+    this.admin = new AuthAdminClient(client);
+  }
+
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      ...extra,
+    };
+  }
+
+  private async post<T = any>(path: string, body: Record<string, unknown>, extraHeaders: Record<string, string> = {}): Promise<T> {
+    const res = await fetch(`${this.client.endpoint}${path}`, {
+      method: "POST",
+      headers: this.headers(extraHeaders),
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      throw new Error(`PGBHub Auth ${path} failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as T;
   }
 
   /** Sign up a new user with email & password */
-  async signUp(_options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<{ user: AuthUser; session?: AuthSession }> {
-    return this.notImplemented("signUp");
+  async signUp(options: { email: string; password?: string; metadata?: Record<string, any> }): Promise<AuthResult> {
+    const result = await this.post<AuthResult>("/auth/signup", {
+      email: options.email,
+      password: options.password,
+      metadata: options.metadata || {},
+    });
+    this.currentSession = result.session;
+    return result;
   }
 
   /** Sign in with email & password */
-  async signIn(_options: { email: string; password?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
-    return this.notImplemented("signIn");
+  async signIn(options: { email: string; password?: string }): Promise<LoginResult> {
+    const result = await this.post<LoginResult>("/auth/login", {
+      email: options.email,
+      password: options.password,
+    });
+    if (result.session) {
+      this.currentSession = result.session;
+    }
+    return result;
   }
 
-  /** Sign out and invalidate session */
+  /** Sign out and invalidate the current session */
   async signOut(): Promise<void> {
+    const token = this.currentSession?.access_token;
+    if (token) {
+      try {
+        await this.post("/auth/logout", {}, { "X-PGB-User-Token": token });
+      } catch {
+        // Best effort — a failed server-side revoke must not block clearing local state.
+      }
+    }
     this.currentSession = null;
-    return this.notImplemented("signOut");
   }
 
   /** Get current authenticated user details */
   async getUser(): Promise<AuthUser | null> {
-    return this.notImplemented("getUser");
+    const token = this.currentSession?.access_token;
+    if (!token) return null;
+    const res = await fetch(`${this.client.endpoint}/auth/user`, {
+      headers: this.headers({ "X-PGB-User-Token": token }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+    return data.user || null;
   }
 
   /** Get current active session */
@@ -266,15 +330,124 @@ export class AuthClient {
     this.currentSession = session;
   }
 
-  /** Verify OTP token */
-  async verifyOtp(_options: { email: string; token: string; type?: string }): Promise<{ user: AuthUser; session: AuthSession }> {
-    return this.notImplemented("verifyOtp");
+  /** Exchange a refresh token for a new session, rotating the refresh token */
+  async refreshSession(refreshToken?: string): Promise<AuthResult> {
+    const token = refreshToken || this.currentSession?.refresh_token;
+    if (!token) throw new Error("PGBHub Auth refreshSession() requires a refresh token (none provided and no active session).");
+    const result = await this.post<AuthResult>("/auth/refresh", { refresh_token: token });
+    this.currentSession = result.session;
+    return result;
   }
 
-  /** Send passwordless magic link */
-  async sendMagicLink(_options: { email: string }): Promise<{ success: boolean; message?: string }> {
-    return this.notImplemented("sendMagicLink");
+  /** Request a one-time passcode be issued for passwordless sign-in */
+  async requestOtp(options: { email: string }): Promise<{ message: string; expires_in: number }> {
+    return this.post("/auth/otp", { email: options.email });
   }
+
+  /** Verify a one-time passcode and establish a session */
+  async verifyOtp(options: { email: string; token: string }): Promise<AuthResult> {
+    const result = await this.post<AuthResult>("/auth/otp/verify", { email: options.email, token: options.token });
+    this.currentSession = result.session;
+    return result;
+  }
+
+  /** Send a passwordless magic link */
+  async sendMagicLink(options: { email: string }): Promise<{ message: string; token: string; expires_in: number }> {
+    return this.post("/auth/magic", { email: options.email });
+  }
+
+  /** Verify a magic link token and establish a session */
+  async verifyMagicLink(options: { token: string }): Promise<AuthResult> {
+    const result = await this.post<AuthResult>("/auth/magic/verify", { token: options.token });
+    this.currentSession = result.session;
+    return result;
+  }
+}
+
+/**
+ * Admin user management (`pgb.auth.admin.*`) — Secret-key-only, mirrors
+ * routers/auth_ingress.py's /auth/admin/users CRUD exactly.
+ */
+export class AuthAdminClient {
+  constructor(private readonly client: PGBHubClientCore) {}
+
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+    };
+  }
+
+  private async request<T = any>(path: string, method: string, body?: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`${this.client.endpoint}${path}`, {
+      method,
+      headers: this.headers(),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      throw new Error(`PGBHub Auth Admin ${method} ${path} failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as T;
+  }
+
+  /** List users registered in this project */
+  async listUsers(): Promise<AuthUser[]> {
+    const data = await this.request<{ users: AuthUser[] }>("/auth/admin/users", "GET");
+    return data.users || [];
+  }
+
+  /** Create a user directly (bypasses signup email verification) */
+  async createUser(options: { email: string; password?: string; metadata?: Record<string, any>; isVerified?: boolean }): Promise<AuthUser> {
+    const data = await this.request<{ user: AuthUser }>("/auth/admin/users", "POST", {
+      email: options.email,
+      password: options.password,
+      metadata: options.metadata || {},
+      is_verified: options.isVerified ?? true,
+    });
+    return data.user;
+  }
+
+  /** Fetch a single user by ID */
+  async getUser(userId: string): Promise<AuthUser | null> {
+    try {
+      const data = await this.request<{ user: AuthUser }>(`/auth/admin/users/${encodeURIComponent(userId)}`, "GET");
+      return data.user;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Update a user's password, metadata, or verification status */
+  async updateUser(userId: string, updates: { password?: string; metadata?: Record<string, any>; isVerified?: boolean }): Promise<AuthUser> {
+    const body: Record<string, unknown> = {};
+    if (updates.password !== undefined) body.password = updates.password;
+    if (updates.metadata !== undefined) body.metadata = updates.metadata;
+    if (updates.isVerified !== undefined) body.is_verified = updates.isVerified;
+    const data = await this.request<{ user: AuthUser }>(`/auth/admin/users/${encodeURIComponent(userId)}`, "PATCH", body);
+    return data.user;
+  }
+
+  /** Delete a user and invalidate their sessions */
+  async deleteUser(userId: string): Promise<boolean> {
+    const data = await this.request<{ success: boolean }>(`/auth/admin/users/${encodeURIComponent(userId)}`, "DELETE");
+    return !!data.success;
+  }
+}
+
+export interface StorageFile {
+  data: ArrayBuffer;
+  contentType: string;
+  path: string;
+  etag?: string;
+}
+
+export interface MediaTransformOptions {
+  width?: number;
+  height?: number;
+  format?: "webp" | "jpeg" | "png" | "avif";
+  fit?: "cover" | "contain" | "fill";
 }
 
 /**
@@ -378,6 +551,41 @@ export class StorageClient {
     // The server returns { objects, count }, not { files }.
     return data.objects || [];
   }
+
+  /** Download a stored file's raw bytes */
+  async getFile(filePath: string): Promise<StorageFile> {
+    const cleanPath = filePath.replace(/^\/+/, "");
+    const res = await fetch(`${this.client.endpoint}/storage/${cleanPath}`, {
+      headers: {
+        Accept: "*/*",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`Storage getFile('${filePath}') failed [${res.status}]: ${await res.text()}`);
+    }
+    const data = await res.arrayBuffer();
+    return {
+      data,
+      contentType: res.headers.get("content-type") || "application/octet-stream",
+      path: cleanPath,
+      etag: res.headers.get("etag") || undefined,
+    };
+  }
+
+  /**
+   * Download a stored image, optionally requesting a transform.
+   *
+   * The server does not implement on-the-fly image transforms yet (no
+   * width/height/format handling exists in its storage delivery route) —
+   * `options` is accepted here for forward compatibility only and
+   * currently has no effect. This returns the original file unmodified,
+   * identically to getFile(). Do not rely on resizing/format conversion
+   * actually happening until PGBHub ships real transform support.
+   */
+  async getMedia(filePath: string, _options: MediaTransformOptions = {}): Promise<StorageFile> {
+    return this.getFile(filePath);
+  }
 }
 
 export interface SendMailOptions {
@@ -463,6 +671,19 @@ export interface FunctionInvokeOptions {
   query?: Record<string, string>;
 }
 
+export interface FunctionDeployOptions {
+  title?: string;
+  description?: string;
+  runtime?: string;
+  entrypoint?: string;
+  triggerType?: string;
+  triggerConfig?: Record<string, unknown>;
+  envVars?: Record<string, string>;
+  isEnabled?: boolean;
+  timeoutMs?: number;
+  memoryMb?: number;
+}
+
 /**
  * Serverless Cloud & Edge Functions Client
  */
@@ -524,6 +745,62 @@ export class FunctionsClient {
     if (!res.ok) throw new Error(`Failed to list functions: ${res.statusText}`);
     const data = await res.json();
     return data.functions || [];
+  }
+
+  /**
+   * Create or update a serverless cloud function's code and configuration.
+   *
+   * The server's save-function logic is an upsert regardless of which
+   * route calls it, so this always POSTs to the functions collection
+   * endpoint (name goes in the body, not the URL) rather than needing to
+   * check existence first and switch between POST/PUT.
+   */
+  async deploy(name: string, code: string, options: FunctionDeployOptions = {}): Promise<any> {
+    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        name,
+        code,
+        title: options.title,
+        description: options.description,
+        runtime: options.runtime,
+        entrypoint: options.entrypoint,
+        trigger_type: options.triggerType,
+        trigger_config: options.triggerConfig,
+        env_vars: options.envVars,
+        is_enabled: options.isEnabled,
+        timeout_ms: options.timeoutMs,
+        memory_mb: options.memoryMb,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Function deploy '${name}' failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data.function ?? data;
+  }
+
+  /** Delete a cloud function */
+  async delete(name: string): Promise<boolean> {
+    const url = `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/functions/${encodeURIComponent(name)}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Function delete '${name}' failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return !!data.success;
   }
 }
 
@@ -599,6 +876,47 @@ export class PGBHubClientCore {
       throw new Error(`PGBHub request to ${path} failed [${res.status}]: ${errorText}`);
     }
     return res.json() as Promise<R>;
+  }
+
+  /**
+   * Provision a new PGBHub-managed PostgreSQL database.
+   *
+   * Requires an account-level API key (one created with scope_type
+   * "account", not a project-scoped `pgb_sec_`/`pgb_pub_` key) — a
+   * project key is permanently bound to the one database it was issued
+   * for and the server rejects (403) any attempt to use it to provision
+   * an unrelated new one.
+   */
+  async createDatabase(name: string, options: { pgVersion?: string; extensions?: string[] } = {}): Promise<{
+    database: string;
+    pg_version: string;
+    extensions: string[];
+    user: string;
+    password: string;
+    public_host: string;
+    public_port: number;
+    url: string;
+    message: string;
+  }> {
+    const url = `${this.endpoint}/api/v1/databases`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        name,
+        pg_version: options.pgVersion || "17",
+        extensions: options.extensions,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`createDatabase('${name}') failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data;
   }
 
   /** Fetch the structured machine-readable /schema.json metadata */
