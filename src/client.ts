@@ -7,6 +7,8 @@ export interface PGBHubClientConfig {
   dbUrl?: string;
   /** Database name target (default: postgres) */
   database?: string;
+  /** Project ID — required by QueuesClient, whose routes are addressed by project rather than database. */
+  projectId?: string;
 }
 
 export interface PGBHubClientOptions {
@@ -804,11 +806,541 @@ export class FunctionsClient {
   }
 }
 
+// ─── Cron ──────────────────────────────────────────────────────────────
+
+export interface CronJob {
+  id: string;
+  name: string;
+  description?: string;
+  expression: string;
+  timezone: string;
+  target_type: string;
+  target_config: Record<string, unknown>;
+  is_enabled: boolean;
+  concurrency_policy: string;
+  timeout_seconds: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  last_run_at?: string | null;
+  last_status?: string | null;
+  last_duration_ms?: number | null;
+  next_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CronRun {
+  id: string;
+  cron_id: string;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  duration_ms?: number;
+  error?: string | null;
+}
+
+export interface CreateCronJobOptions {
+  description?: string;
+  timezone?: string;
+  isEnabled?: boolean;
+  concurrencyPolicy?: string;
+  timeoutSeconds?: number;
+  maxRetries?: number;
+  retryDelaySeconds?: number;
+}
+
+export interface UpdateCronJobFields {
+  name?: string;
+  description?: string;
+  expression?: string;
+  timezone?: string;
+  concurrencyPolicy?: string;
+  timeoutSeconds?: number;
+  maxRetries?: number;
+  targetType?: string;
+  targetConfig?: Record<string, unknown>;
+}
+
+/**
+ * Scheduled (cron) job management.
+ *
+ * `cron-job` routes are addressed by database name
+ * (`/api/v1/databases/{db}/crons/...`) — target_config's shape depends
+ * on target_type: function -> {function_name, payload}, sql -> {sql},
+ * action -> {action_name, params}, http -> {url, method, body?},
+ * mail -> {to, subject, body}.
+ */
+export class CronClient {
+  constructor(private readonly client: PGBHubClientCore) {}
+
+  private get base(): string {
+    return `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/crons`;
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+    };
+  }
+
+  private async handle<T>(res: Response, label: string): Promise<T> {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Cron ${label} failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as T;
+  }
+
+  /** List scheduled cron jobs */
+  async list(): Promise<CronJob[]> {
+    const res = await fetch(this.base, { headers: this.headers() });
+    const data = await this.handle<{ crons: CronJob[] }>(res, "list");
+    return data.crons || [];
+  }
+
+  /** Create a scheduled cron job */
+  async create(
+    name: string,
+    expression: string,
+    targetType: string,
+    targetConfig: Record<string, unknown>,
+    options: CreateCronJobOptions = {}
+  ): Promise<CronJob> {
+    const res = await fetch(this.base, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        name,
+        expression,
+        target_type: targetType,
+        target_config: targetConfig,
+        description: options.description,
+        timezone: options.timezone,
+        is_enabled: options.isEnabled,
+        concurrency_policy: options.concurrencyPolicy,
+        timeout_seconds: options.timeoutSeconds,
+        max_retries: options.maxRetries,
+        retry_delay_seconds: options.retryDelaySeconds,
+      }),
+    });
+    return this.handle<CronJob>(res, "create");
+  }
+
+  /** Enable or disable a cron job */
+  async toggle(cronId: string, enabled: boolean): Promise<CronJob> {
+    const res = await fetch(`${this.base}/${encodeURIComponent(cronId)}/toggle`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ enabled }),
+    });
+    return this.handle<CronJob>(res, "toggle");
+  }
+
+  /** Manually trigger a cron job to run immediately */
+  async run(cronId: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.base}/${encodeURIComponent(cronId)}/run`, {
+      method: "POST",
+      headers: this.headers(),
+    });
+    return this.handle(res, "run");
+  }
+
+  /** Delete a cron job */
+  async delete(cronId: string): Promise<{ deleted: boolean; id: string }> {
+    const res = await fetch(`${this.base}/${encodeURIComponent(cronId)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    return this.handle(res, "delete");
+  }
+
+  /** List recent run history for a cron job */
+  async listRuns(cronId: string, limit: number = 50): Promise<CronRun[]> {
+    const res = await fetch(`${this.base}/${encodeURIComponent(cronId)}/runs?limit=${limit}`, {
+      headers: this.headers(),
+    });
+    const data = await this.handle<{ runs: CronRun[] }>(res, "listRuns");
+    return data.runs || [];
+  }
+
+  /** Update a cron job's configuration */
+  async update(cronId: string, updates: UpdateCronJobFields): Promise<CronJob> {
+    const body: Record<string, unknown> = {};
+    if (updates.name !== undefined) body.name = updates.name;
+    if (updates.description !== undefined) body.description = updates.description;
+    if (updates.expression !== undefined) body.expression = updates.expression;
+    if (updates.timezone !== undefined) body.timezone = updates.timezone;
+    if (updates.concurrencyPolicy !== undefined) body.concurrency_policy = updates.concurrencyPolicy;
+    if (updates.timeoutSeconds !== undefined) body.timeout_seconds = updates.timeoutSeconds;
+    if (updates.maxRetries !== undefined) body.max_retries = updates.maxRetries;
+    if (updates.targetType !== undefined) body.target_type = updates.targetType;
+    if (updates.targetConfig !== undefined) body.target_config = updates.targetConfig;
+
+    const res = await fetch(`${this.base}/${encodeURIComponent(cronId)}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify(body),
+    });
+    return this.handle<CronJob>(res, "update");
+  }
+}
+
+// ─── Jobs ──────────────────────────────────────────────────────────────
+
+export type JobTargetType = "function" | "webhook" | "sql";
+export type JobStatus = "pending" | "running" | "done" | "failed" | "dead" | "cancelled";
+
+export interface BackgroundJob {
+  id: number;
+  job_type: string;
+  target_type: JobTargetType;
+  target_config: Record<string, unknown>;
+  payload?: unknown;
+  status: JobStatus;
+  idempotency_key?: string | null;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at?: string | null;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnqueueJobOptions {
+  payload?: unknown;
+  idempotencyKey?: string;
+  maxAttempts?: number;
+}
+
+export interface ListJobsOptions {
+  status?: JobStatus;
+  limit?: number;
+}
+
+/**
+ * On-demand asynchronous background job queue (`client.jobs`). Execution
+ * happens out-of-band in the server's own jobs scheduler — these methods
+ * only enqueue/inspect/cancel.
+ */
+export class JobsClient {
+  constructor(private readonly client: PGBHubClientCore) {}
+
+  private get base(): string {
+    return `${this.client.endpoint}/api/v1/databases/${encodeURIComponent(this.client.database)}/jobs`;
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+    };
+  }
+
+  private async handle<T>(res: Response, label: string): Promise<T> {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Jobs ${label} failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as T;
+  }
+
+  /** Enqueue a new background job */
+  async enqueue(
+    jobType: string,
+    targetType: JobTargetType,
+    targetConfig: Record<string, unknown>,
+    options: EnqueueJobOptions = {}
+  ): Promise<BackgroundJob> {
+    const res = await fetch(this.base, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        job_type: jobType,
+        target_type: targetType,
+        target_config: targetConfig,
+        payload: options.payload,
+        idempotency_key: options.idempotencyKey,
+        max_attempts: options.maxAttempts,
+      }),
+    });
+    const data = await this.handle<{ success: boolean; job: BackgroundJob }>(res, "enqueue");
+    return data.job;
+  }
+
+  /** Fetch a single job by ID, or null if not found */
+  async get(jobId: number): Promise<BackgroundJob | null> {
+    const res = await fetch(`${this.base}/${jobId}`, { headers: this.headers() });
+    if (res.status === 404) return null;
+    const data = await this.handle<{ success: boolean; job: BackgroundJob }>(res, "get");
+    return data.job;
+  }
+
+  /** List jobs, optionally filtered by status */
+  async list(options: ListJobsOptions = {}): Promise<BackgroundJob[]> {
+    const params = new URLSearchParams();
+    if (options.status) params.set("status", options.status);
+    if (options.limit) params.set("limit", String(options.limit));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const res = await fetch(`${this.base}${qs}`, { headers: this.headers() });
+    const data = await this.handle<{ success: boolean; jobs: BackgroundJob[]; total: number }>(res, "list");
+    return data.jobs || [];
+  }
+
+  /** Cancel a pending/running job. Returns false if it could not be cancelled (already running or finished). */
+  async cancel(jobId: number): Promise<boolean> {
+    const res = await fetch(`${this.base}/${jobId}/cancel`, { method: "POST", headers: this.headers() });
+    if (res.status === 409) return false;
+    const data = await this.handle<{ success: boolean; cancelled: boolean }>(res, "cancel");
+    return !!data.cancelled;
+  }
+}
+
+// ─── Queues ──────────────────────────────────────────────────────────────
+
+export interface SendMessageOptions {
+  delaySeconds?: number;
+  deduplicationId?: string;
+}
+
+export interface SentMessage {
+  message_id: string;
+  queue_name: string;
+  status: string;
+  scheduled_at?: string;
+  created_at?: string;
+  deduplicated: boolean;
+}
+
+export interface ReceivedMessage {
+  message_id: string;
+  payload: unknown;
+  [key: string]: unknown;
+}
+
+export interface ReceiveMessagesOptions {
+  maxMessages?: number;
+  visibilityTimeout?: number;
+  consumerId?: string;
+}
+
+/**
+ * Durable message queues (`client.queues`). Unlike Cron/Jobs/Functions,
+ * these routes are addressed by project ID, not database name
+ * (`/api/v1/projects/{projectId}/queues/{queueName}/...`) — pass
+ * `projectId` to createClient()/PGBHubClientCore or set
+ * PGBHUB_PROJECT_ID. Queue creation/deletion is dashboard-only today
+ * (no API route exists); this client covers send/receive/ack/nack
+ * against an already-created queue.
+ */
+export class QueuesClient {
+  constructor(private readonly client: PGBHubClientCore) {}
+
+  private requireProjectId(): string {
+    if (!this.client.projectId) {
+      throw new Error(
+        "QueuesClient requires a projectId — pass { projectId } to createClient()/PGBHubClientCore, or set PGBHUB_PROJECT_ID."
+      );
+    }
+    return this.client.projectId;
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+    };
+  }
+
+  private async handle<T>(res: Response, label: string): Promise<T> {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Queues ${label} failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as T;
+  }
+
+  private url(queueName: string, action: string): string {
+    return `${this.client.endpoint}/api/v1/projects/${encodeURIComponent(this.requireProjectId())}/queues/${encodeURIComponent(queueName)}/${action}`;
+  }
+
+  /** Send a message to a queue */
+  async send(queueName: string, payload: unknown, options: SendMessageOptions = {}): Promise<SentMessage> {
+    const res = await fetch(this.url(queueName, "send"), {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ payload, delay_seconds: options.delaySeconds, deduplication_id: options.deduplicationId }),
+    });
+    const data = await this.handle<{ ok: boolean; message: SentMessage }>(res, "send");
+    return data.message;
+  }
+
+  /** Receive (and lease) messages from a queue */
+  async receive(queueName: string, options: ReceiveMessagesOptions = {}): Promise<ReceivedMessage[]> {
+    const res = await fetch(this.url(queueName, "receive"), {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        max_messages: options.maxMessages,
+        visibility_timeout: options.visibilityTimeout,
+        consumer_id: options.consumerId,
+      }),
+    });
+    const data = await this.handle<{ ok: boolean; count: number; messages: ReceivedMessage[] }>(res, "receive");
+    return data.messages || [];
+  }
+
+  /** Acknowledge (delete) a successfully processed message */
+  async ack(queueName: string, messageId: string): Promise<boolean> {
+    const res = await fetch(this.url(queueName, "ack"), {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ message_id: messageId }),
+    });
+    const data = await this.handle<{ ok: boolean }>(res, "ack");
+    return !!data.ok;
+  }
+
+  /** Negatively acknowledge a message — returns it to the queue (or to the DLQ past max retries) */
+  async nack(queueName: string, messageId: string, error?: string): Promise<boolean> {
+    const res = await fetch(this.url(queueName, "nack"), {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ message_id: messageId, error }),
+    });
+    const data = await this.handle<{ ok: boolean }>(res, "nack");
+    return !!data.ok;
+  }
+}
+
+// ─── Realtime ────────────────────────────────────────────────────────────
+
+export interface BroadcastOptions {
+  event?: string;
+  senderId?: string;
+}
+
+export interface BroadcastResult {
+  ok: boolean;
+  broadcast: Record<string, unknown>;
+}
+
+export interface RealtimeEvent {
+  event: string;
+  data: unknown;
+}
+
+/**
+ * Realtime broadcast/subscribe channels (`client.realtime`). Channel
+ * names are namespaced server-side by project, so two different
+ * projects' channels of the same name never collide; pass `projectId`
+ * for callers reaching the bare (non-project-path) routes without a
+ * project-scoped key, the same way QueuesClient needs it.
+ */
+export class RealtimeClient {
+  constructor(private readonly client: PGBHubClientCore) {}
+
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
+      ...(this.client.projectId ? { "X-PGB-Project-ID": this.client.projectId } : {}),
+    };
+  }
+
+  /** Broadcast a message to a realtime channel */
+  async broadcast(channel: string, payload: unknown, options: BroadcastOptions = {}): Promise<BroadcastResult> {
+    const url = `${this.client.endpoint}/api/v1/realtime/channels/${encodeURIComponent(channel)}/broadcast`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ channel, event: options.event || "message", payload, sender_id: options.senderId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(`Realtime broadcast failed [${res.status}]: ${data.error || JSON.stringify(data)}`);
+    }
+    return data as BroadcastResult;
+  }
+
+  /**
+   * Subscribe to a realtime channel via Server-Sent Events. Returns an
+   * unsubscribe function. Requires a fetch implementation whose Response
+   * exposes a readable stream body (Node 18+, browsers, Deno, Bun).
+   */
+  subscribe(channel: string, onEvent: (evt: RealtimeEvent) => void, onError?: (err: unknown) => void): () => void {
+    const controller = new AbortController();
+    const url = `${this.client.endpoint}/api/v1/realtime/stream?channel=${encodeURIComponent(channel)}`;
+
+    (async () => {
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: "text/event-stream", ...this.headers() },
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) {
+          throw new Error(`Realtime subscribe failed [${res.status}]`);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEvent = "message";
+        let currentData: string[] = [];
+
+        const flush = () => {
+          if (currentData.length === 0) return;
+          const raw = currentData.join("\n");
+          let parsed: unknown = raw;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            // leave as the raw string
+          }
+          onEvent({ event: currentEvent, data: parsed });
+          currentEvent = "message";
+          currentData = [];
+        };
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line === "") {
+              flush();
+            } else if (line.startsWith("event:")) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              currentData.push(line.slice(5).trim());
+            }
+          }
+        }
+      } catch (err) {
+        if ((err as { name?: string } | null)?.name !== "AbortError" && onError) {
+          onError(err);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }
+}
+
 export class PGBHubClientCore {
   readonly endpoint: string;
   readonly apiKey?: string;
   readonly dbUrl?: string;
   readonly database: string;
+  readonly projectId?: string;
 
   /** HTTP Database Gateway Query API */
   public readonly db: DbClient = new DbClient(this);
@@ -825,6 +1357,18 @@ export class PGBHubClientCore {
   /** Functions API client namespace */
   public readonly functions: FunctionsClient = new FunctionsClient(this);
 
+  /** Scheduled (cron) job management */
+  public readonly cron: CronClient = new CronClient(this);
+
+  /** On-demand asynchronous background job queue */
+  public readonly jobs: JobsClient = new JobsClient(this);
+
+  /** Durable message queues (send/receive/ack/nack) */
+  public readonly queues: QueuesClient = new QueuesClient(this);
+
+  /** Realtime broadcast/subscribe channels */
+  public readonly realtime: RealtimeClient = new RealtimeClient(this);
+
   /** Actions proxy map (e.g. pgb.actions.saveUser({ ... })) */
   readonly actions: Record<string, (params?: Record<string, unknown>, opts?: ActionInvokeOptions) => Promise<ActionResponse>>;
 
@@ -833,6 +1377,7 @@ export class PGBHubClientCore {
     this.apiKey = config.apiKey || (typeof process !== "undefined" ? process.env?.PGBHUB_API_KEY || process.env?.PGBHUB_PUBLISHABLE_KEY : undefined);
     this.dbUrl = config.dbUrl || (typeof process !== "undefined" ? process.env?.DATABASE_URL : undefined);
     this.database = config.database || (typeof process !== "undefined" ? process.env?.PGBHUB_DATABASE : undefined) || "postgres";
+    this.projectId = config.projectId || (typeof process !== "undefined" ? process.env?.PGBHUB_PROJECT_ID : undefined);
 
     // Dynamic JavaScript Proxy handler for actions sub-property
     this.actions = new Proxy({} as Record<string, any>, {
