@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Universal TypeScript & Node.js client SDK and Developer CLI for PGBHub Cloud",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
     "pgb": "./bin/pgb.js",
@@ -22,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/PGBHub/pgbhub-sdk-ts.git"
+    "url": "https://github.com/PGBHub/pgb-sdk-ts.git"
   },
   "keywords": [
     "pgbhub",
