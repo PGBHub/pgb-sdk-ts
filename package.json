@@ -1,7 +1,7 @@
 {
-  "name": "@pgb/sdk",
-  "version": "1.0.0",
-  "description": "Universal TypeScript & Node.js client SDK and Developer CLI for PGBHub Cloud",
+  "name": "@pgbhub/client",
+  "version": "1.1.0",
+  "description": "Official TypeScript and Node.js SDK for PGBHub Cloud: database, auth, storage, mail, functions, cron, jobs, queues, realtime and actions",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
@@ -11,7 +11,8 @@
   "files": [
     "dist",
     "bin",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -24,19 +25,36 @@
     "url": "https://github.com/PGBHub/pgb-sdk-ts.git"
   },
   "keywords": [
+    "actions",
+    "auth",
+    "authentication",
+    "codegen",
+    "cron",
+    "database",
     "pgbhub",
     "postgres",
     "postgresql",
-    "serverless",
-    "database",
+    "queues",
+    "realtime",
     "sdk",
-    "actions",
-    "codegen"
+    "sdk-typescript",
+    "serverless"
   ],
   "author": "Hydratik <engineering@pgbhub.com>",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.4.1",
     "typescript": "^7.0.2"
-  }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "bugs": {
+    "url": "https://github.com/PGBHub/pgb-sdk-ts/issues"
+  },
+  "homepage": "https://github.com/PGBHub/pgb-sdk-ts#readme"
 }
