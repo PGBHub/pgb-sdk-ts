@@ -1,4 +1,4 @@
-# @pgbhub/client
+# @pgb/sdk
 
 The official TypeScript / Node.js SDK for **PGBHub Cloud**: database, authentication, storage, mail, functions, cron, jobs, queues, realtime and actions, from one typed client.
 
@@ -7,13 +7,13 @@ The official TypeScript / Node.js SDK for **PGBHub Cloud**: database, authentica
 - Typed errors, request timeouts and safe retries built in.
 
 ```bash
-npm install @pgbhub/client
+npm install @pgb/sdk
 ```
 
 ## Create a client
 
 ```ts
-import { createClient } from "@pgbhub/client";
+import { createClient } from "@pgb/sdk";
 
 // In a browser or mobile app: your project's PUBLISHABLE key (pgb_pub_...).
 const pgb = createClient("my-project", { key: "pgb_pub_..." });
@@ -144,7 +144,7 @@ await admin.actions.$delete("saveUser");
 Every failed request throws a `PGBError`:
 
 ```ts
-import { PGBError } from "@pgbhub/client";
+import { PGBError } from "@pgb/sdk";
 
 try {
   await pgb.auth.signIn({ email, password });

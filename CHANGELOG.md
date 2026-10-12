@@ -16,4 +16,4 @@
 - `projectId` alone now selects the project's address.
 
 **Packaging**
-- Published as `@pgbhub/client` (the name the documentation uses). The manifest previously said `@pgb/sdk`.
+- Published as `@pgb/sdk`, matching the manifest and the documentation.

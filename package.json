@@ -1,5 +1,5 @@
 {
-  "name": "@pgbhub/client",
+  "name": "@pgb/sdk",
   "version": "1.1.0",
   "description": "Official TypeScript and Node.js SDK for PGBHub Cloud: database, auth, storage, mail, functions, cron, jobs, queues, realtime and actions",
   "main": "./dist/index.js",
