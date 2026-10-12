@@ -398,6 +398,24 @@ export interface AuthSettings {
   password_policy: { min_length: number; require_uppercase: boolean; require_number: boolean; require_symbol: boolean };
   allow_self_delete: boolean;
   access_token_ttl_seconds: number;
+  /** Extra sign-up fields the project asks for (username, name, user type, ...). Send their values as `metadata` on `signUp()`. */
+  signup_fields: SignupField[];
+}
+
+export interface SignupField {
+  key: string;
+  label: string;
+  type: "text" | "long_text" | "number" | "boolean" | "select";
+  required: boolean;
+  /** False means it is set at sign-up and the user can't change it later. */
+  editable: boolean;
+  help?: string;
+  /** For `select` fields. */
+  options?: string[];
+  min_length?: number;
+  max_length?: number;
+  min?: number;
+  max?: number;
 }
 
 export type OAuthProvider = "google" | "github";

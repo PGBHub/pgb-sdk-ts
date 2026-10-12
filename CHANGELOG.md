@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `AuthSettings.signup_fields` (the `SignupField` type): the extra sign-up fields a project asks for. Send their values as `metadata` on `signUp()`; the server checks them.
+
 ## 1.1.0
 
 **Fixes (these affect existing apps)**
