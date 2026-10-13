@@ -35,7 +35,7 @@ export function errorMessageFrom(body: any, fallback = ""): string {
 }
 
 export interface PGBHubClientConfig {
-  /** PGBHub Cloud Endpoint URL (default: https://cloud.pgbhub.com or project URL) */
+  /** PGBHub Cloud Endpoint URL (default: https://console.pgbhub.com or project URL) */
   endpoint?: string;
   /** PGBHub API Key or Access Token */
   apiKey?: string;
@@ -1711,7 +1711,7 @@ export class PGBHubClientCore {
       config.endpoint ||
       env("PGBHUB_ENDPOINT") ||
       env("PGBHUB_PROJECT_URL") ||
-      (this.projectId ? `https://${this.projectId}.${projectDomain}` : "https://cloud.pgbhub.com")
+      (this.projectId ? `https://${this.projectId}.${projectDomain}` : "https://console.pgbhub.com")
     ).replace(/\/$/, "");
     this.apiKey = config.apiKey || env("PGBHUB_API_KEY") || env("PGBHUB_PUBLISHABLE_KEY");
     this.dbUrl = config.dbUrl || env("DATABASE_URL");

@@ -52,7 +52,7 @@ Commands:
 
 Options:
   --port <port>        Port for pgb dev simulator (default: 4000)
-  --endpoint <url>     PGBHub Cloud endpoint (default: $PGBHUB_ENDPOINT or https://cloud.pgbhub.com)
+  --endpoint <url>     PGBHub Cloud endpoint (default: $PGBHUB_ENDPOINT or https://console.pgbhub.com)
   --key <api-key>      PGBHub API Key (default: $PGBHUB_API_KEY)
   --db <dbname>        Target database name (default: postgres)
   --out <filename>     Output filename for pgb pull (default: pgbhub.d.ts)
@@ -88,7 +88,7 @@ You can obtain your secret key from your PGBHub Console dashboard.
   }
 
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://console.pgbhub.com";
 
   fs.writeFileSync(configFile, JSON.stringify({ apiKey: key, endpoint, loggedInAt: new Date().toISOString() }, null, 2));
   console.log(`✅ Successfully logged in! Credentials saved to ~/.pgbhub/config.json`);
@@ -410,7 +410,7 @@ Press Ctrl+C to terminate simulator.
 
 async function handlePull(args: string[]) {
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://console.pgbhub.com";
 
   const keyIndex = args.indexOf("--key");
   const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBHUB_API_KEY;
@@ -441,7 +441,7 @@ async function handlePull(args: string[]) {
 
 async function handleInspect(args: string[]) {
   const endpointIndex = args.indexOf("--endpoint");
-  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://cloud.pgbhub.com";
+  const endpoint = endpointIndex !== -1 ? args[endpointIndex + 1] : process.env.PGBHUB_ENDPOINT || "https://console.pgbhub.com";
 
   const keyIndex = args.indexOf("--key");
   const apiKey = keyIndex !== -1 ? args[keyIndex + 1] : process.env.PGBHUB_API_KEY;
