@@ -921,14 +921,26 @@ export interface SendMailOptions {
   html?: string;
   text?: string;
   from?: string;
+  /** One address for the Reply-To header. The server refuses line breaks, commas and semicolons (400). */
   replyTo?: string;
 }
 
+/** `PGBError.code` when the platform has no mail provider configured (HTTP 503). */
+export const MAIL_PROVIDER_UNAVAILABLE = "MAIL_PROVIDER_UNAVAILABLE";
+
 export interface MailSendResult {
   success: boolean;
+  /** The sent message's id. Filled from `mail_id` when an older server returns only that. */
   message_id?: string;
+  /** Older name for `message_id`; same value. */
+  mail_id?: string;
+  to?: string;
+  from?: string;
+  provider?: string;
+  status?: string;
   /** Present only when `to` had more than one recipient (see note below). */
-  results?: Array<{ to: string; success: boolean; message_id?: string; error?: string }>;
+  results?: Array<{ to: string; success: boolean; message_id?: string; error?: string; code?: string }>;
+  [key: string]: unknown;
 }
 
 /**
@@ -937,7 +949,15 @@ export interface MailSendResult {
 export class MailClient {
   constructor(private readonly client: PGBHubClientCore) {}
 
-  private async sendOne(options: SendMailOptions, to: string): Promise<{ success: boolean; message_id?: string }> {
+  private async sendOne(options: SendMailOptions, to: string): Promise<MailSendResult> {
+    const payload: Record<string, unknown> = {
+      to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      from: options.from,
+    };
+    if (options.replyTo) payload.reply_to = options.replyTo;
     const res = await this.client.http(`${this.client.endpoint}/mail/send`, {
       method: "POST",
       headers: {
@@ -945,19 +965,28 @@ export class MailClient {
         Accept: "application/json",
         ...(this.client.apiKey ? { Authorization: `Bearer ${this.client.apiKey}` } : {}),
       },
-      body: JSON.stringify({
-        to,
-        subject: options.subject,
-        html: options.html,
-        text: options.text,
-        from: options.from,
-        reply_to: options.replyTo,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      throw new PGBError(`Mail send to ${to} failed [${res.status}]: ${await res.text()}`, { status: res.status });
+      const raw = await res.text().catch(() => "");
+      let data: any = raw;
+      try {
+        data = raw ? JSON.parse(raw) : undefined;
+      } catch {
+        // not JSON: keep the raw text
+      }
+      const code = data && typeof data === "object" && typeof data.code === "string" ? data.code : undefined;
+      const retryAfter = Number(res.headers?.get?.("retry-after"));
+      throw new PGBError(`Mail send to ${to} failed [${res.status}]: ${errorMessageFrom(data, raw)}`, {
+        status: res.status,
+        code,
+        body: data,
+        retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+      });
     }
-    return (await res.json()) as any;
+    const result = ((await res.json().catch(() => ({}))) || {}) as MailSendResult;
+    if (result.message_id === undefined && result.mail_id !== undefined) result.message_id = result.mail_id;
+    return result;
   }
 
   /**
@@ -970,6 +999,10 @@ export class MailClient {
    * A single string `to` sends one request as before; an array sends
    * one request per recipient and aggregates the results instead of
    * silently delivering to only one address.
+   *
+   * A failed send throws `PGBError` with the HTTP `status` and the server's
+   * `code`; with no mail provider configured that is 503 and
+   * `MAIL_PROVIDER_UNAVAILABLE`.
    */
   async send(options: SendMailOptions): Promise<MailSendResult> {
     const recipients = Array.isArray(options.to) ? options.to : [options.to];
@@ -985,7 +1018,12 @@ export class MailClient {
           const r = await this.sendOne(options, to);
           return { to, success: r.success !== false, message_id: r.message_id };
         } catch (err) {
-          return { to, success: false, error: err instanceof Error ? err.message : String(err) };
+          return {
+            to,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+            ...(err instanceof PGBError && err.code ? { code: err.code } : {}),
+          };
         }
       })
     );

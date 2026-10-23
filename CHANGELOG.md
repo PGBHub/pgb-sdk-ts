@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
+- Mail: `replyTo` on `mail.send()` is sent as `reply_to` (and only when set). `MailSendResult.message_id` is filled from `mail_id` when an older server returns only that; `mail_id`, `to`, `from`, `provider` and `status` are typed.
+- Mail: a failed send throws `PGBError` with `status`, the server's `code` and `body`. With no mail provider configured that is HTTP 503 and `MAIL_PROVIDER_UNAVAILABLE` (exported as a constant). Multi-recipient `results` carry the `code` too.
 - `AuthSettings.signup_fields` (the `SignupField` type): the extra sign-up fields a project asks for. Send their values as `metadata` on `signUp()`; the server checks them.
 
 ## 1.1.0

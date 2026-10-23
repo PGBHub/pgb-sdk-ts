@@ -139,6 +139,29 @@ await admin.actions.$retryDelivery(42);
 await admin.actions.$delete("saveUser");
 ```
 
+## Mail
+
+```ts
+import { PGBError, MAIL_PROVIDER_UNAVAILABLE } from "@pgb/sdk";
+
+try {
+  const sent = await admin.mail.send({
+    to: "alex@example.com",
+    subject: "Your receipt",
+    text: "Thanks for your order.",
+    html: "<p>Thanks for your order.</p>",
+    replyTo: "support@acme.dev",   // optional: one address for the Reply-To header
+  });
+  console.log(sent.message_id);
+} catch (err) {
+  if (err instanceof PGBError && err.code === MAIL_PROVIDER_UNAVAILABLE) {
+    // 503: the platform has no mail provider configured right now; retry later
+  }
+}
+```
+
+Sending needs the project's **secret key**. `replyTo` is a single address: line breaks, commas and semicolons are refused with a 400. `message_id` identifies the sent message (on an older server it is filled from `mail_id`). An array `to` sends one message per recipient and returns per-recipient `results`.
+
 ## Errors
 
 Every failed request throws a `PGBError`:
