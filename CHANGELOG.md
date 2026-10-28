@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+**New**
+- Storage: private buckets and signed URLs. `storage.createSignedUrl(bucket, path, { method, expiresIn, contentType })` mints a GET or PUT URL for one object (`POST /storage/sign`, secret key). `storage.uploadToSignedUrl(url, body, contentType)` uploads to a signed PUT URL without an API key. `storage.createBucket(name, { visibility })` creates a public (default) or private bucket. `storage.setBucketVisibility(name, visibility, { confirmPublic })` changes it; going public throws unless `confirmPublic: true`.
+- Types: `BucketVisibility`, `CreateSignedUrlOptions`, `SignedUrl`, `SignedUploadResult`, `BucketVisibilityChange`.
+- `getPublicUrl()` is documented as public-bucket only: a private bucket's objects need the secret key or a signed URL.
+
 ## 0.1.0 (unreleased)
 
 First release; not yet published.

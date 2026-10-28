@@ -182,13 +182,46 @@ try {
 }
 ```
 
+## Storage: private buckets and signed URLs
+
+Buckets are **public** by default. A **private** bucket's objects are readable only with the project's
+**secret** key (`pgb_sec_...`), by project members in the console, or through a signed URL. Publishable
+keys (`pgb_pub_...`) never read private objects, because they ship inside frontends. `getPublicUrl()` does
+not work for objects in a private bucket; mint a signed URL instead.
+
+These calls need the secret key, so make them on a server and hand only the URL to the browser:
+
+```ts
+const pgb = createClient("my-project", { key: process.env.PGB_SECRET_KEY });
+
+await pgb.storage.createBucket("receipts", { visibility: "private" }); // visibility defaults to "public"
+
+// A 15-minute download link for one object (at most 24 hours for GET).
+const { url } = await pgb.storage.createSignedUrl("receipts", "2026/inv-1.pdf", { expiresIn: 900 });
+
+// An upload link (at most 1 hour). With contentType, the upload must use exactly that type.
+const put = await pgb.storage.createSignedUrl("receipts", "2026/inv-2.pdf", { method: "PUT", contentType: "application/pdf" });
+await pgb.storage.uploadToSignedUrl(put.url, fileBytes, "application/pdf"); // no API key needed: the URL is the credential
+
+await pgb.storage.setBucketVisibility("receipts", "private");
+await pgb.storage.setBucketVisibility("assets", "public", { confirmPublic: true }); // throws without confirmPublic
+```
+
+- `createSignedUrl` calls `POST /storage/sign` on the project's address, so the client must point at it
+  (`createClient("my-project")` or `projectId`). `createBucket` and `setBucketVisibility` address the project by
+  `projectId`, or by the slug in a `https://<slug>.pgbhub.app` endpoint.
+- Anyone holding a signed URL can use it until it expires. A GET URL also answers HEAD.
+- Without a bound `contentType`, a signed PUT refuses HTML, SVG, XML and JavaScript (415).
+- Making a bucket private takes effect within seconds, but copies a browser or the CDN already fetched are not
+  recalled.
+
 ## Other clients
 
 | Namespace | Methods |
 |---|---|
 | `pgb.table(name)` / `pgb.<table>` | `find`, `findFirst`, `findOne`, `findUnique`, `create`, `insertOne`, `update`, `updateOne`, `delete`, `deleteOne`, `count` |
 | `pgb.db` | `query` (HTTP SQL gateway) |
-| `pgb.storage` | `upload`, `getPublicUrl`, `getFile`, `getMedia`, `list`, `delete` |
+| `pgb.storage` | `upload`, `getPublicUrl` (public buckets only), `getFile`, `getMedia`, `list`, `delete`, `createSignedUrl`, `uploadToSignedUrl`, `createBucket`, `setBucketVisibility` |
 | `pgb.mail` | `send` |
 | `pgb.functions` | `invoke`, `list`, `deploy`, `delete` |
 | `pgb.cron` | `list`, `create`, `update`, `toggle`, `run`, `listRuns`, `delete` |

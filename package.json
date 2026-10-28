@@ -1,6 +1,6 @@
 {
   "name": "@pgb/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Official TypeScript and Node.js SDK for PGBHub Cloud: database, auth, storage, mail, functions, cron, jobs, queues, realtime and actions",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

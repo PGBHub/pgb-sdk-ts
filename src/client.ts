@@ -777,6 +777,54 @@ export interface MediaTransformOptions {
   fit?: "cover" | "contain" | "fill";
 }
 
+/** Who can read a bucket's objects. Buckets are public unless made private. */
+export type BucketVisibility = "public" | "private";
+
+export interface CreateSignedUrlOptions {
+  /** "GET" to download (the default; also answers HEAD) or "PUT" to upload. */
+  method?: "GET" | "PUT";
+  /** Lifetime in seconds. Default 900 (15 minutes); at most 86400 for GET and 3600 for PUT. */
+  expiresIn?: number;
+  /** PUT only: the upload must use exactly this Content-Type. Needed to allow HTML, SVG, XML or JavaScript. */
+  contentType?: string;
+}
+
+/** A signed URL for one object and one method, from `storage.createSignedUrl()`. */
+export interface SignedUrl {
+  /** The full URL on the project's own address. Anyone holding it can use it until it expires. */
+  url: string;
+  /** The URL's path (`/storage/_signed/<token>`). */
+  path: string;
+  method: "GET" | "PUT";
+  bucket: string;
+  file_path: string;
+  expires_in: number;
+  /** Unix time (seconds) when the URL stops working. */
+  expires_at: number;
+  /** The Content-Type a PUT is bound to, or null. */
+  content_type: string | null;
+  bucket_visibility: BucketVisibility;
+  [key: string]: unknown;
+}
+
+export interface SignedUploadResult {
+  success: boolean;
+  bucket: string;
+  file_path: string;
+  size_bytes: number;
+  [key: string]: unknown;
+}
+
+export interface BucketVisibilityChange {
+  success: boolean;
+  bucket: string;
+  visibility: BucketVisibility;
+  previous_visibility: BucketVisibility;
+  /** Present when a public bucket went private: copies already cached by browsers or the CDN are not recalled. */
+  note?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Storage Client for Cloudflare R2 Assets
  */
@@ -839,7 +887,11 @@ export class StorageClient {
     };
   }
 
-  /** Get public CDN URL for an asset */
+  /**
+   * The public URL of an asset. It does not work for objects in a private
+   * bucket: those are readable only with the project's secret key or a signed
+   * URL (see `createSignedUrl`).
+   */
   getPublicUrl(filePath: string): string {
     const cleanPath = filePath.replace(/^\/+/, "");
     return `${this.client.endpoint}/storage/${cleanPath}`;
@@ -912,6 +964,89 @@ export class StorageClient {
    */
   async getMedia(filePath: string, _options: MediaTransformOptions = {}): Promise<StorageFile> {
     return this.getFile(filePath);
+  }
+
+  /**
+   * The project these bucket calls address: `projectId` when configured,
+   * otherwise the slug in a `https://<slug>.pgbhub.app` endpoint.
+   */
+  private projectRef(): string {
+    if (this.client.projectId) return this.client.projectId;
+    const domain = (typeof process !== "undefined" ? process.env?.PGBHUB_PROJECT_DOMAIN : undefined) || "pgbhub.app";
+    let host = "";
+    try { host = new URL(this.client.endpoint).hostname.toLowerCase(); } catch { /* not a URL */ }
+    if (host.endsWith(`.${domain}`)) {
+      const slug = host.slice(0, -(domain.length + 1));
+      if (slug && !slug.includes(".")) return slug;
+    }
+    throw new Error("Bucket management needs the project: pass { projectId } to createClient(), set PGBHUB_PROJECT_ID, or use the project's address (https://<slug>.pgbhub.app) as the endpoint.");
+  }
+
+  /**
+   * A signed URL for one object: GET to download it (also from a private
+   * bucket), PUT to upload it. Calls `POST /storage/sign` on the project's
+   * address and needs the project's **secret** key (`pgb_sec_...`), so call it
+   * on a server and hand only the URL to the browser or end user.
+   */
+  async createSignedUrl(bucket: string, path: string, options: CreateSignedUrlOptions = {}): Promise<SignedUrl> {
+    const method = (options.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "PUT") throw new Error(`createSignedUrl: method must be "GET" or "PUT", not "${options.method}".`);
+    if (options.contentType && method !== "PUT") throw new Error("createSignedUrl: contentType applies only to PUT (upload) URLs.");
+    return this.client.api<SignedUrl>("POST", "/storage/sign", {
+      body: {
+        bucket,
+        path: path.replace(/^\/+/, ""),
+        method,
+        ...(options.expiresIn !== undefined ? { expires_in: options.expiresIn } : {}),
+        ...(options.contentType ? { content_type: options.contentType } : {}),
+      },
+    });
+  }
+
+  /**
+   * Upload bytes to a signed PUT URL from `createSignedUrl(..., { method: "PUT" })`.
+   * No API key is sent: the URL is the credential. If the URL was minted with a
+   * `contentType`, pass the same one.
+   */
+  async uploadToSignedUrl(url: string, body: BodyInit | Uint8Array | ArrayBuffer | Blob | string, contentType = "application/octet-stream"): Promise<SignedUploadResult> {
+    const target = url.startsWith("/") ? `${this.client.endpoint}${url}` : url;
+    const res = await this.client.http(target, {
+      method: "PUT",
+      headers: { "Content-Type": contentType, Accept: "application/json" },
+      body: body as BodyInit,
+    });
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      throw new PGBError(`Signed upload failed [${res.status}]: ${errorMessageFrom(data)}`, { status: res.status, body: data });
+    }
+    return data as SignedUploadResult;
+  }
+
+  /**
+   * Create a bucket. Visibility defaults to "public", as every bucket was
+   * before private buckets existed. Needs the project's secret key (or an
+   * account key with storage rights).
+   */
+  async createBucket(name: string, options: { visibility?: BucketVisibility } = {}): Promise<{ success: boolean; bucket: string; visibility: BucketVisibility }> {
+    return this.client.api("POST", `/api/v1/projects/${encodeURIComponent(this.projectRef())}/storage/buckets`, {
+      body: { name, visibility: options.visibility || "public" },
+    });
+  }
+
+  /**
+   * Make a bucket private, or public. Going private is enforced within
+   * seconds, but copies a browser or the CDN already fetched are not recalled.
+   * Going public exposes every object in the bucket, so it needs
+   * `{ confirmPublic: true }`; without it this throws and sends nothing.
+   */
+  async setBucketVisibility(name: string, visibility: BucketVisibility, options: { confirmPublic?: boolean } = {}): Promise<BucketVisibilityChange> {
+    if (visibility !== "public" && visibility !== "private") throw new Error(`setBucketVisibility: visibility must be "public" or "private", not "${visibility}".`);
+    if (visibility === "public" && options.confirmPublic !== true) {
+      throw new Error(`setBucketVisibility: making bucket '${name}' public exposes every object in it to anyone with its URL. Pass { confirmPublic: true } to proceed.`);
+    }
+    return this.client.api<BucketVisibilityChange>("POST", `/api/v1/projects/${encodeURIComponent(this.projectRef())}/storage/buckets/${encodeURIComponent(name)}/visibility`, {
+      body: { visibility, ...(visibility === "public" ? { confirm_public: true } : {}) },
+    });
   }
 }
 

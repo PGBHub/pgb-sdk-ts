@@ -225,7 +225,7 @@ DATABASE_URL=postgresql://${projectName}_app:password@db.pgbhub.dev:5432/${proje
           pull: "pgb pull",
         },
         dependencies: {
-          "@pgb/sdk": "^0.1.0",
+          "@pgb/sdk": "^0.2.0",
         },
       },
       null,
